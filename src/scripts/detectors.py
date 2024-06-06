@@ -27,14 +27,15 @@ class BaseDetector:
         pass
 
     @abc.abstractmethod
-    def postprocess(self, frames):
-        assert isinstance(frames, typing.List)
+    def postprocess(self, detections):
+        assert isinstance(detections, typing.List)
         # Some code ..
 
 
-        assert isinstance(frames, typing.List)
-        return frames
-    pass
+        # assert isinstance(frames, typing.List)
+        # raise NotImplementedError
+        return detections
+    # pass
 
 
 class CourtDetector(BaseDetector):
@@ -56,7 +57,23 @@ class BallDetector(BaseDetector):
 
 
 class PlayerDetector(BaseDetector):
-    pass
+    def __init__(self, path) -> None:
+        super().__init__(path)
+
+    def predict(self, frames):
+        return super().predict(frames)
+
+    def postprocess(self, detections):
+        """ """
+        detections = self._choose_main_players(detections)
+        return super().postprocess(detections)
+    
+    def _choose_main_players(self, detections):
+        """
+        """
+        return detections
+        # pass
+    # pass
 
 
 class NetDetector(BaseDetector):
