@@ -11,28 +11,47 @@
 
 import os
 from typing import List
+
+import pandas as pd
+import pickle   # for artifacts
+import torch
+
 from src.scripts import CourtDetector, PlayerDetector, BallDetector
-from src.scripts import RemoveBadFrames
+from src.scripts import RemoveBadFrames, RemoveShadow
 from src.scripts.utils import read_video, save_video
 # from models import 
 
 
+# 
 MAIN_PATH = os.getcwd()
+SHIFT_FRAMES_2_PREDICTIONS = 25   # Ball
+# VIDEO_SIZE = (1080, 1920)
+# FPS = 30 
 
-SHIFT_FRAMES_2_PREDICTIONS = 25   # Ball 
-
+# 
 path = r'data/vizualize/tennis_1.mp4'
-
+is_writen = True    # Artefacts of trackers
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+# 
 if os.path.exists(path):
     # Get Images
     frames = read_video(path)
+    print(f"Frames length is:   {len(frames)}\n")
 else:
     frames = []
+
 
 # Load Models
 court_model_path = './models/court_model.pt'
 ball_model_path = './models/ball_model.pt'
 player_model_path = './models/player_model.pt'
+
+print("Test paths with models")
+print(os.path.exists(court_model_path))
+print(os.path.exists(ball_model_path))
+print(os.path.exists(player_model_path))
+print()
 
 # 
 #       Clear Game
@@ -49,32 +68,21 @@ players_detectior = PlayerDetector(player_model_path)
 ball_detectior = BallDetector(ball_model_path)
 #   Apply Machine Learning Block
 # Get Model predict from input video
-player_predictions = players_detectior.predict(frames)  # players_detectior(video) 
+player_predictions = players_detectior.predict(frames)
+                                            #    read_from_stub=is_writen,
+                                            #    stub_path='data/temporary/player_detections.pkl')  # players_detectior(video) 
 # Get predicts of balls
-ball_predictions = ball_detectior.predict(frames)
+ball_predictions = ball_detectior.predict(frames, 
+                                          read_from_stub=is_writen,
+                                          stub_path='data/temporary/ball_detections.pkl')
 # Get court keypoints 
-court_keypoints_predictions = FieldsKeypointsDetection.predict(frames)
+court_keypoints_predictions = FieldsKeypointsDetection.predict(frames,
+                                                               read_from_stub=is_writen,
+                                                               stub_path='data/temporary/court_detections.pkl')
 
 # 1. Use other model, for Shot Recognition and Predicting missing points
 # Predict missing points in ball detections
-class FillBallDetections:
-    def __init__(self) -> None:
-        pass
-
-    def __call__(self, frames)-> List:
-        # some code ...
-        assert isinstance(frames, List)
-        return frames
-
-# Shot Recognition
-class ShotType:
-    def __init__(self) -> None:
-        pass
-
-    def __call__(self, frames: List)-> List:
-        #   some code ...
-        assert isinstance(frames, List)
-        return frames
+from src.scripts import FillBallDetections, ShotType
 
 # Concat ball detections and Type of shoе predict (classification)
 # results
@@ -148,10 +156,8 @@ ball_is_in_out = ball_checker(mini_ball_predictions, mini_ball_bounces)
 # self.model = Model
 """
     На подумать:
-      - BallBounce и BallHit и BallCheck - это массив из 0 и 1?
-"""
-import pandas as pd
-import pickle   # for artifacts
+      - BallBounce и BallHit и BallCheck - это массив из 0 и 1, или лучше массив из индексов?
+      """
 
 
 class SpeedEstimator:
