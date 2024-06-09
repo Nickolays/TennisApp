@@ -30,7 +30,7 @@ SHIFT_FRAMES_2_PREDICTIONS = 25   # Ball
 
 # 
 path = r'data/vizualize/tennis_1.mp4'
-is_writen = True    # Artefacts of trackers
+is_writen = False    # Artefacts of trackers
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
 # 
@@ -74,11 +74,20 @@ player_predictions = players_detectior.predict(frames)
 # Get predicts of balls
 ball_predictions = ball_detectior.predict(frames, 
                                           read_from_stub=is_writen,
-                                          stub_path='data/temporary/ball_detections.pkl')
+                                          stub_path='data/temporary/ball_detections.pkl') 
 # Get court keypoints 
 court_keypoints_predictions = FieldsKeypointsDetection.predict(frames,
                                                                read_from_stub=is_writen,
                                                                stub_path='data/temporary/court_detections.pkl')
+
+
+""" SAVE VIDEO """
+frames = FieldsKeypointsDetection.draw_keypoints(frames, court_keypoints_predictions)
+frames = ball_detectior.draw_bboxes(video_frames=frames, ball_detections=ball_predictions)
+
+output_video_path = "./results/output_1.mp4"
+save_video(frames, output_video_path)
+
 
 # 1. Use other model, for Shot Recognition and Predicting missing points
 # Predict missing points in ball detections

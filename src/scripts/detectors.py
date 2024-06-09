@@ -102,6 +102,7 @@ class CourtDetector(BaseDetector):
                 keypoints = pickle.load(f)
             return keypoints
         
+        output = []
         for frame in tqdm(frames):
             # 1. 
             frame = self.preprocess(frame)
@@ -109,12 +110,16 @@ class CourtDetector(BaseDetector):
             predict = self.get_predict(frame)
             # 3. 
             keypoints = self.postprocess(predict)
+            # 4. Save
+            output.append(keypoints)
+
         # 
         if stub_path is not None:
             with open(stub_path, 'wb') as f:
-                pickle.dump(keypoints, f)
+                pickle.dump(output, f)
 
-        return keypoints
+        assert len(frames) == len(output)
+        return output
 
     def preprocess(self, image):
         """  """
@@ -152,6 +157,44 @@ class CourtDetector(BaseDetector):
         # Clear cash for GPU
         predict = predict.detach()   # 
         return predict
+    
+    def draw_keypoints(self, frames, keypoints):
+
+        assert len(frames) == len(keypoints)
+        # Plot keypoints on the image
+        # print(image.shape)
+        
+        # Reshape image. This will resize the image to have n cols (width) and k rows (height):
+        # image = cv2.resize(image, self.MODEL_INPUT_SIZE)
+        out_frames = []
+        for frame, kpoints in zip(frames, keypoints):
+            # height, width, channels = image.shape
+            # Normilize array
+            frame = (frame - frame.min()) / (frame.max() - frame.min())
+            frame = frame * 255
+            frame = frame.astype(np.uint8)
+            # print(image)
+            frame = np.ascontiguousarray(frame, dtype=np.uint8)
+            # 
+            if self.device == torch.device("cuda"):
+                kpoints = kpoints.cpu()
+            # else:
+            #     try:
+            #         keypoints = keypoints.detach().numpy()
+            #     except:
+            #         keypoints = keypoints.cpu()
+            for i, points in enumerate(kpoints):
+                y = int(points[0])
+                x = int(points[1])
+                
+                cv2.putText(frame, str(i), (y, x-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                cv2.circle(frame, (y, x), 2, (0, 0, 255), -1)
+                frame[x, y, :] = 255, 255, 255
+
+            out_frames.append(frame)
+        
+        assert len(out_frames) == len(frames), f"Length of in data doesn't equals output lenght, {len(frames)} and {len(out_frames)}"
+        return out_frames
 
 
 class BallDetector(BaseDetector):
@@ -195,6 +238,29 @@ class BallDetector(BaseDetector):
             ball_dict[1] = result
         
         return ball_dict
+    
+    def draw_bboxes(self, video_frames, ball_detections):
+        """ """
+        output_video_frames = [] 
+        for frame, ball_dict in zip(video_frames, ball_detections):
+            # Draw Bounding Box
+            for track_id, bbox in ball_dict.items():
+                x1, y1, x2, y2 = bbox
+                cv2.putText(frame, 
+                            f"Ball: {track_id}", 
+                            (int(bbox[0]), int(bbox[1]-10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 
+                            0.9,
+                            (0, 0, 255),
+                            2,
+                )
+                frame = cv2.rectangle(frame, 
+                                      (int(x1), int(y1)), 
+                                      (int(x2), int(y2)), 
+                                      (0, 0, 255), 
+                                      2)
+            output_video_frames.append(frame)
+        return output_video_frames
 
 
 class PlayerDetector(BaseDetector):
@@ -213,6 +279,32 @@ class PlayerDetector(BaseDetector):
         """
         """
         return detections
+    
+    def draw_bboxes(self, video_frames, player_detections):
+        """ """
+        assert len(video_frames) == len(player_detections), "Difference size of arrays"
+
+        output_video_frames = [] 
+        for frame, player_dict in zip(video_frames, player_detections):
+            # Draw Bounding Box
+            for track_id, bbox in player_dict.items():
+                x1, y1, x2, y2 = bbox
+                frame = cv2.putText(frame, 
+                            f"Player ID: {track_id}", 
+                            (int(bbox[0]), int(bbox[1]-10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 
+                            0.9,
+                            (0, 0, 255),
+                            2,
+                )
+                frame = cv2.rectangle(frame,
+                                      (int(x1), int(y1)), 
+                                      (int(x2), int(y2)), 
+                                      (0, 0, 255), 
+                                      2)
+                # 
+            output_video_frames.append(frame)
+        return output_video_frames
         # pass
     # pass
 
