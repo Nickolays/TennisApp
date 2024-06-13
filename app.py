@@ -13,6 +13,7 @@ import os
 from typing import List
 
 import pandas as pd
+import cv2
 import pickle   # for artifacts
 import torch
 
@@ -30,7 +31,7 @@ SHIFT_FRAMES_2_PREDICTIONS = 25   # Ball
 
 # 
 path = r'data/vizualize/tennis_1.mp4'
-is_writen = False    # Artefacts of trackers
+is_writen = True    # Artefacts of trackers
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
 # 
@@ -39,11 +40,13 @@ if os.path.exists(path):
     frames = read_video(path)
     print(f"Frames length is:   {len(frames)}\n")
 else:
-    frames = []
+    os.chdir("/home/suetin/Projects/VSCode/TennisApp/MainApp/TennisApp/")
+    frames = read_video(path)
+    print(f"Frames length is:   {len(frames)}\n")
 
 
 # Load Models
-court_model_path = './models/court_model.pt'
+court_model_path = './models/keypoints_model.pth'  # './models/court_model.pt'
 ball_model_path = './models/ball_model.pt'
 player_model_path = './models/player_model.pt'
 
@@ -64,13 +67,13 @@ frames = remover(frames)
 #       Machine Learning Block
 #   Init our fitted and prepared model
 FieldsKeypointsDetection = CourtDetector(court_model_path)
-players_detectior = PlayerDetector(player_model_path)
+players_detector = PlayerDetector(player_model_path)
 ball_detectior = BallDetector(ball_model_path)
 #   Apply Machine Learning Block
 # Get Model predict from input video
-player_predictions = players_detectior.predict(frames)
-                                            #    read_from_stub=is_writen,
-                                            #    stub_path='data/temporary/player_detections.pkl')  # players_detectior(video) 
+player_predictions = players_detector.predict(frames,
+                                               read_from_stub=is_writen,
+                                               stub_path='data/temporary/player_detections.pkl')  # players_detector(video) 
 # Get predicts of balls
 ball_predictions = ball_detectior.predict(frames, 
                                           read_from_stub=is_writen,
@@ -82,11 +85,11 @@ court_keypoints_predictions = FieldsKeypointsDetection.predict(frames,
 
 
 """ SAVE VIDEO """
-frames = FieldsKeypointsDetection.draw_keypoints(frames, court_keypoints_predictions)
-frames = ball_detectior.draw_bboxes(video_frames=frames, ball_detections=ball_predictions)
-
-output_video_path = "./results/output_1.mp4"
-save_video(frames, output_video_path)
+# output_video_1 = frames.copy()
+# output_video_1 = FieldsKeypointsDetection.draw_keypoints(output_video_1, court_keypoints_predictions)
+# output_video_1 = ball_detectior.draw_bboxes(video_frames=output_video_1, ball_detections=ball_predictions)
+# output_video_path = "./results/output_1.mp4"
+# save_video(output_video_1, output_video_path)
 
 
 # 1. Use other model, for Shot Recognition and Predicting missing points
@@ -95,13 +98,35 @@ from src.scripts import FillBallDetections, ShotType
 
 # Concat ball detections and Type of shoе predict (classification)
 # results
+
+
 shot_recognitor = ShotType()  # Use predicted Players coordinates of body keypoints
 types_of_shot = shot_recognitor(player_predictions)
 
+assert len(ball_predictions) == len(frames)
+
 ball_filler = FillBallDetections()
-ball_predictions = ball_filler(ball_predictions) 
+ball_predictions = ball_filler.choose_main_ball(ball_predictions)
+assert len(ball_predictions) == len(frames)
+ball_predictions = ball_filler.interpolate_ball_position(ball_predictions) 
+
+assert len(ball_predictions) == len(frames)
+# TODO: 1. Научится выбирать мяч
+# Choose players !!! ERROR HERE !!!
+player_predictions = players_detector.choose_and_filter_players(court_keypoints_predictions, player_predictions)
 
 
+output_video_2 = frames.copy()
+output_video_2 = FieldsKeypointsDetection.draw_keypoints(output_video_2, court_keypoints_predictions)
+output_video_2 = ball_detectior.draw_bboxes(video_frames=output_video_2, ball_detections=ball_predictions)
+output_video_2 = players_detector.draw_bboxes(output_video_2, player_predictions)
+
+# Draw frame number on top left corner
+for i, frame in enumerate(output_video_2):
+    output_video_2[i] = cv2.putText(output_video_2[i], f"Frame: {i}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+output_video_path = "./results/output_2.mp4"
+save_video(output_video_2, output_video_path)
 # 
 #       Classical Programming and Classical CV
 #    Обработаем выход из модели. 
@@ -109,15 +134,64 @@ ball_predictions = ball_filler(ball_predictions)
 
 # 1. Update homography condition
 from src.scripts import HomographyMatrix
+import numpy as np
+from cv2 import getPerspectiveTransform, warpPerspective, line, circle, rectangle, perspectiveTransform
 # 
 matrixs = HomographyMatrix()
+
+
+# u = np.array([745, 1720, 470, 2010])
+# v = np.array([350, 350, 1070, 1060])
+
+def get_center_of_bbox(bbox):
+    x1, y1, x2, y2 = bbox
+    center_x = int((x1 + x2) / 2)
+    center_y = int((y1 + y2) / 2)
+    return (center_x, center_y)
+
+homoFrames = []
+
+TL = court_keypoints_predictions[0][4]
+TR = court_keypoints_predictions[0][6]  # ?
+LL = court_keypoints_predictions[0][5]  # ??
+LR = court_keypoints_predictions[0][7]
+
+homoFrame, M = matrixs.courtMap(frames[0], *[TL, TR, LL, LR])   # [TL, TR, LL, LR]
+
+homoFrame = matrixs.showLines(homoFrame)
+
+
+# TODO: 2. показывает сразу все позиции на мини-карте
+# Find Center of bbox for every players
+center_players = []
+# Plot players every players on the cort
+for players_coords, ball_coords in zip(player_predictions, ball_predictions):
+    for key, player_coord in players_coords.items():
+        # 
+        player_coord = get_center_of_bbox(player_coord)
+        # 
+        # homoFrame = matrixs.showPoint(homoFrame, M, player_coord)  # [800, 1130])    # homoFrame = matrixs.showPoint(homoFrame, M, [1400, 340])  # UP???
+        points =  matrixs.givePoint(M, player_coord)
+        cv2.circle(homoFrame, center=points, radius=1, color=(0, 0, 255))
+
+    # 
+    # ball_center = get_center_of_bbox(ball_coords)
+    ball_center = np.float32([[ball_coords]]) # Transform to needed format
+    transformed = perspectiveTransform(ball_center, M)[0][0]
+    circle(homoFrame, (int(transformed[0]), int(transformed[1])), radius=0, color=(0, 255, 255), thickness=25)
+        
+
+    homoFrames.append(homoFrame)
+
+# Watch the result
+output_video_path = "./results/output_homo.mp4"
+save_video(homoFrames, output_video_path)
 
 
 
 # 
 #   NEXT STEP: TRANSFORM PLAYERS AND BALL COORDINATES TO MINI MAP
 # 
-
 class MiniMap:
     def __init__(self) -> None:
         self.coordinates = None
