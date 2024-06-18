@@ -187,7 +187,7 @@ class CourtDetector(BaseDetector):
                 frame[x, y, :] = 255, 255, 255
 
             out_frames.append(frame)
-        
+        print(kpoints)
         assert len(out_frames) == len(frames), f"Length of in data doesn't equals output lenght, {len(frames)} and {len(out_frames)}"
         return out_frames
 
@@ -252,8 +252,8 @@ class BallDetector(BaseDetector):
         """ 
             NEW IDEA, USE TRACK INSTEAD PREDICT
         """
-        predicts = self.model.predict(frame, conf=0.3, verbose=False)[0]  # persist=True
-
+        # predicts = self.model.predict(frame, conf=0.3, verbose=False)[0]  # persist=True
+        predicts = self.model.track(frame, persist=True, verbose=False)[0]
         # NEW RESTAILING 11.06.  Change type dict to list instead
         # ball_dict = {}
         # results = []

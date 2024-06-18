@@ -3,13 +3,27 @@ import pandas as pd
 import numpy as np
 
 
+def get_center_of_bbox(bbox):
+    x1, y1, x2, y2 = bbox
+    center_x = int((x1 + x2) / 2)
+    center_y = int((y1 + y2) / 2)
+    return (center_x, center_y)
+
+def measure_distance(p1, p2):
+    """
+    p1 - player_center
+    p2 - court_keypoint
+    """
+    return ((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)**0.5
+
+
 class FillBallDetections:
     """ 
     Simple idea is use Classical ML Regression model. In the future try RNN model 
     """
     def __init__(self) -> None:
 
-        self.min_pix_dist = 100
+        self.min_pix_dist = 80
 
     def interpolate_ball_position(self, ball_detections):
         """  """
@@ -68,7 +82,6 @@ class FillBallDetections:
         last_good_coords= pd.DataFrame(ball_list).mean().to_list()
         # 
         for i in range(len(ball_list[1:])):
-
             # Pixel distance
             # distance = self.measure_distance(ball_list[i+1], ball_list[i])
             distance = self.measure_distance(ball_list[i+1], last_good_coords)
@@ -126,15 +139,3 @@ class FillBallDetections:
 
 
 
-def get_center_of_bbox(bbox):
-    x1, y1, x2, y2 = bbox
-    center_x = int((x1 + x2) / 2)
-    center_y = int((y1 + y2) / 2)
-    return (center_x, center_y)
-
-def measure_distance(p1, p2):
-    """
-    p1 - player_center
-    p2 - court_keypoint
-    """
-    return ((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)**0.5

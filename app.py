@@ -30,8 +30,8 @@ SHIFT_FRAMES_2_PREDICTIONS = 25   # Ball
 # FPS = 30 
 
 # 
-path = r'data/vizualize/tennis_1.mp4'
-is_writen = True    # Artefacts of trackers
+path = r'data/vizualize/tennis_1.mp4'  # r'data/vizualize/input_video.mp4'    # 
+is_writen = False    # Artefacts of trackers
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
 # 
@@ -81,11 +81,7 @@ ball_predictions = ball_detectior.predict(frames,
 # Get court keypoints 
 court_keypoints_predictions = FieldsKeypointsDetection.predict(frames,
                                                                read_from_stub=is_writen,
-                                                               stub_path='data/temporary/court_detections.pkl')
-
-
-""" SAVE VIDEO """
-# output_video_1 = frames.copy()
+                                                               stub_path='data/temporary/court_detections.pkl') 
 # output_video_1 = FieldsKeypointsDetection.draw_keypoints(output_video_1, court_keypoints_predictions)
 # output_video_1 = ball_detectior.draw_bboxes(video_frames=output_video_1, ball_detections=ball_predictions)
 # output_video_path = "./results/output_1.mp4"
@@ -105,13 +101,16 @@ types_of_shot = shot_recognitor(player_predictions)
 
 assert len(ball_predictions) == len(frames)
 
+import numpy as np
+array_ball_predictions = np.array(ball_predictions)    # NEW FOR TRY OTHER INTERPOLATION
+
 ball_filler = FillBallDetections()
-ball_predictions = ball_filler.choose_main_ball(ball_predictions)
-assert len(ball_predictions) == len(frames)
+# ball_predictions = ball_filler.choose_main_ball(ball_predictions)
+# assert len(ball_predictions) == len(frames)
 ball_predictions = ball_filler.interpolate_ball_position(ball_predictions) 
 
 assert len(ball_predictions) == len(frames)
-# TODO: 1. Научится выбирать мяч
+
 # Choose players !!! ERROR HERE !!!
 player_predictions = players_detector.choose_and_filter_players(court_keypoints_predictions, player_predictions)
 
@@ -151,15 +150,19 @@ def get_center_of_bbox(bbox):
 
 homoFrames = []
 
-TL = court_keypoints_predictions[0][4]
-TR = court_keypoints_predictions[0][6]  # ?
-LL = court_keypoints_predictions[0][5]  # ??
-LR = court_keypoints_predictions[0][7]
+TL = court_keypoints_predictions[0][5]  # 4
+TR = court_keypoints_predictions[0][7]  # ? 6 
+LL = court_keypoints_predictions[0][4]  # ??  5 
+LR = court_keypoints_predictions[0][6]  # 7
 
 homoFrame, M = matrixs.courtMap(frames[0], *[TL, TR, LL, LR])   # [TL, TR, LL, LR]
 
 homoFrame = matrixs.showLines(homoFrame)
 
+
+#           MVP IS READY
+# 
+#   NEXT STEP: TRANSFORM PLAYERS AND BALL COORDINATES TO MINI MAP
 
 # TODO: 2. показывает сразу все позиции на мини-карте
 # Find Center of bbox for every players
@@ -172,15 +175,14 @@ for players_coords, ball_coords in zip(player_predictions, ball_predictions):
         # 
         # homoFrame = matrixs.showPoint(homoFrame, M, player_coord)  # [800, 1130])    # homoFrame = matrixs.showPoint(homoFrame, M, [1400, 340])  # UP???
         points =  matrixs.givePoint(M, player_coord)
-        cv2.circle(homoFrame, center=points, radius=1, color=(0, 0, 255))
+        homoFrame = cv2.circle(homoFrame, center=points, radius=1, color=(0, 0, 255))
 
     # 
     # ball_center = get_center_of_bbox(ball_coords)
     ball_center = np.float32([[ball_coords]]) # Transform to needed format
     transformed = perspectiveTransform(ball_center, M)[0][0]
-    circle(homoFrame, (int(transformed[0]), int(transformed[1])), radius=0, color=(0, 255, 255), thickness=25)
+    homoFrame = circle(homoFrame, (int(transformed[0]), int(transformed[1])), radius=2, color=(0, 255, 255), thickness=2)
         
-
     homoFrames.append(homoFrame)
 
 # Watch the result
@@ -189,8 +191,7 @@ save_video(homoFrames, output_video_path)
 
 
 
-# 
-#   NEXT STEP: TRANSFORM PLAYERS AND BALL COORDINATES TO MINI MAP
+
 # 
 class MiniMap:
     def __init__(self) -> None:
@@ -213,33 +214,44 @@ mini_ball_predictions = mini_mapper.transform(ball_predictions)
 mini_players_predictions = mini_mapper.transform(ball_predictions)
 
 
-from src.scripts import BallBounce, BallHit, Score, StepCount, BallCheck  # , VideoRetiming, Stabilization
+from src.scripts import BounceDetector, SecondBouncer  # , BallHit, Score, StepCount # BallCheck  # , VideoRetiming, Stabilization
 
 # Use Optical Flow for improving quality of n_frames ball's detections. The frames will be more slow motion
 # Use Stabilization by court detections keypoints
 
 
+# TODO: Try MVP  Ball Bounce and Ball Check  
 #   TRACK BALL POSITION
-ball_bouncer = BallBounce()
-ball_hitter = BallHit()
+ball_bouncer = BounceDetector('./models/ctb_regr_bounce.cbm')
+ball_bouncer_1 = SecondBouncer()
+
+ball_bounces = ball_bouncer.predict(array_ball_predictions[:, 0], array_ball_predictions[:, 1], smooth=True)   # Return list of indexcies
+ball_bounces_1 = ball_bouncer_1.predict(ball_predictions)
+
+mini_ball_bounces = mini_mapper.transform(ball_bounces)
+
+print()
+# ball_hitter = BallHit()
 # score_counter = Score()
 # step_counter = StepCount()
 # 
-ball_checker = BallCheck()
+# ball_checker = BallCheck()
 
-ball_bounces = ball_bouncer(ball_predictions)
-mini_ball_bounces = mini_mapper.transform(ball_bounces)
+# ball_hits = ball_hitter(ball_predictions)
 
-ball_hits = ball_hitter(ball_predictions)
 # 
-mini_ball_hits = mini_mapper.transform(ball_hits)
+# mini_ball_hits = mini_mapper.transform(ball_hits)
 # Ball Checker
-ball_is_in_out = ball_checker(mini_ball_predictions, mini_ball_bounces)
+# ball_is_in_out = ball_checker(mini_ball_predictions, mini_ball_bounces)
 
 # self.model = Model
 """
     На подумать:
-      - BallBounce и BallHit и BallCheck - это массив из 0 и 1, или лучше массив из индексов?
+      - BallBounce и BallHit и BallCheck - это массив из индексов
+      - Модель для предсказания отскока справляется так себе, надо доучивать/переучивать. Для улучшения 2ого метода нужна более точная модель предсказания мяча
+      - Попробовать всё таки трекать, где используем YOLO. Часто перекидывает на нежуные мячи. Решение: Попробовать трекать область с мячом, 
+      например квадрат со сторонами 250 пикселей и идти скользящим окном по фото с небольшим отставанием от предыдущего 
+      - Как лучше всего считать скорость
       """
 
 
@@ -249,55 +261,6 @@ class SpeedEstimator:
     
     def calculate(self, ball_predections: List):
         assert type(frames) == List
-
-        # rames = 
-
-        # read the picle file
-        with open('../tracker_stubs/ball_detections.pkl', 'rb') as f:
-            ball_positions = pickle.load(f)
-
-        df_ball_positions = pd.DataFrame()
-
-        ball_positions = [x.get(1, []) for x in ball_positions]   # if not detections return []
-        # convert the list into pandas.DataFrame
-        df_ball_positions = pd.DataFrame(ball_positions, columns=['x1', 'y1', 'x2', 'y2'])
-
-        # interpolate the missing values
-        df_ball_positions = df_ball_positions.interpolate()
-        df_ball_positions = df_ball_positions.bfill()
-
-        # Convert pandas.DataFrame to original format. Back up
-        ball_positions = [{1:x} for x in df_ball_positions.to_numpy().tolist()]
-
-        df_ball_positions['mid_y'] = (df_ball_positions['y1'] + df_ball_positions['y2']) / 2
-        df_ball_positions['mid_y_rolling_mean'] = df_ball_positions['mid_y'].rolling(window=5, min_periods=1, center=False).mean()
-
-        df_ball_positions['mid_x'] = (df_ball_positions['x1'] + df_ball_positions['x2']) / 2
-        df_ball_positions['mid_x_rolling_mean'] = df_ball_positions['mid_x'].rolling(window=5, min_periods=1, center=False).mean()
-
-        df_ball_positions['delta_y'] = df_ball_positions['mid_y_rolling_mean'].diff()
-
-
-        df_ball_positions['ball_hit'] = 0
-
-        minimum_change_frames_for_hit = 25
-        for i in range(1,len(df_ball_positions)- int(minimum_change_frames_for_hit*1.2) ):
-            negative_position_change = df_ball_positions['delta_y'].iloc[i] >0 and df_ball_positions['delta_y'].iloc[i+1] <0
-            positive_position_change = df_ball_positions['delta_y'].iloc[i] <0 and df_ball_positions['delta_y'].iloc[i+1] >0
-
-            if negative_position_change or positive_position_change:
-                change_count = 0 
-                for change_frame in range(i+1, i+int(minimum_change_frames_for_hit*1.2)+1):
-                    negative_position_change_following_frame = df_ball_positions['delta_y'].iloc[i] >0 and df_ball_positions['delta_y'].iloc[change_frame] <0
-                    positive_position_change_following_frame = df_ball_positions['delta_y'].iloc[i] <0 and df_ball_positions['delta_y'].iloc[change_frame] >0
-
-                    if negative_position_change and negative_position_change_following_frame:
-                        change_count+=1
-                    elif positive_position_change and positive_position_change_following_frame:
-                        change_count+=1
-            
-                if change_count>minimum_change_frames_for_hit-1:
-                    df_ball_positions['ball_hit'].iloc[i] = 1
 
     pass
 
