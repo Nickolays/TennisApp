@@ -25,23 +25,43 @@ class FillBallDetections:
 
         self.min_pix_dist = 80
 
-    def interpolate_ball_position(self, ball_detections):
+    def interpolate_ball_position(self, df_ball_positions):
         """  """
-        ball_positions = ball_detections
-        # ball_positions = [x.get(1, []) for x in ball_detections]   # if not detections return []
-        # convert the list into pandas.DataFrame
-        
-        df_ball_positions = pd.DataFrame(ball_positions, columns=['x', 'y'])
-
         # interpolate the missing values
         df_ball_positions = df_ball_positions.interpolate(method='linear', axis=0)
         df_ball_positions = df_ball_positions.bfill()
-        df_ball_positions = df_ball_positions.round()
- 
-        # Convert pandas.DataFrame to original format. Back up
-        # ball_positions = [{1:x} for x in df_ball_positions.to_numpy().tolist()]
-        ball_positions = df_ball_positions.values.tolist()
+        df_ball_positions = df_ball_positions.round().astype('int')
 
+        return df_ball_positions
+    
+    def preprocess(self, ball_detections, window=5):
+        """  """
+        # convert the list into pandas.DataFrame
+        df_ball_positions = pd.DataFrame(ball_detections, columns=['x', 'y'])
+
+        # Calc features
+        df_ball_positions['y_ma'] = df_ball_positions['y'].rolling(window=window, min_periods=1, center=False).mean()
+        df_ball_positions['x_ma'] = df_ball_positions['x'].rolling(window=window, min_periods=1, center=False).mean()
+
+        df_ball_positions['delta_y'] = df_ball_positions['y_ma'].diff()
+        df_ball_positions['delta_x'] = df_ball_positions['x_ma'].diff() 
+
+        df_ball_positions['y_ma_shifted'] = df_ball_positions['y_ma'].shift(-1)
+        df_ball_positions['x_ma_shifted'] = df_ball_positions['x_ma'].shift(1)
+        df_ball_positions = df_ball_positions.fillna(0)
+        # Calc distance
+        df_ball_positions['distance'] = ((df_ball_positions['x_ma'] - df_ball_positions['x_ma_shifted'])**2 \
+                                + (df_ball_positions['y_ma'] - df_ball_positions['y_ma_shifted'])**2) 
+        # Choose main ball and replace to Nan extreme values
+        extreme_value = df_ball_positions['distance'][1:].quantile(0.95)
+        df_ball_positions['x'] = np.where(df_ball_positions['distance'] < extreme_value, df_ball_positions['x'].values, np.NaN)
+        df_ball_positions['y'] = np.where(df_ball_positions['distance'] < extreme_value, df_ball_positions['y'].values, np.NaN)
+
+        # Interpolate Nans
+        df_ball_positions = self.interpolate_ball_position(df_ball_positions)
+        
+        # Convert to original format
+        ball_positions = df_ball_positions[['x', 'y']].values.tolist()
         return ball_positions
     
     @staticmethod

@@ -105,9 +105,10 @@ import numpy as np
 array_ball_predictions = np.array(ball_predictions)    # NEW FOR TRY OTHER INTERPOLATION
 
 ball_filler = FillBallDetections()
+ball_predictions = ball_filler.preprocess(ball_predictions, window=5)   # NEW
 # ball_predictions = ball_filler.choose_main_ball(ball_predictions)
 # assert len(ball_predictions) == len(frames)
-ball_predictions = ball_filler.interpolate_ball_position(ball_predictions) 
+# ball_predictions = ball_filler.interpolate_ball_position(ball_predictions) 
 
 assert len(ball_predictions) == len(frames)
 
@@ -209,6 +210,7 @@ ball_bounces_1 = ball_bouncer_1.predict(ball_predictions)
 mini_ball_bounces = mini_mapper.transform(ball_bounces)
 
 print()
+""" First idea: Calculate direction """
 # ball_hitter = BallHit()
 # score_counter = Score()
 # step_counter = StepCount()
@@ -225,8 +227,7 @@ print()
 # self.model = Model
 
 
-# TODO: 2. показывает сразу все позиции на мини-карте
-# Find Center of bbox for every players
+# TODO: 2. показывает сразу все позиции на мини-карте. DONE. Но не знаю как удалить старые, может сохранять по батчу
 
 # Watch the result
 output_video_path = "./results/output_homo.mp4"
