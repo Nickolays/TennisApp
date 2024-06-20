@@ -31,7 +31,7 @@ SHIFT_FRAMES_2_PREDICTIONS = 25   # Ball
 
 # 
 path = r'data/vizualize/tennis_1.mp4'  # r'data/vizualize/input_video.mp4'    # 
-is_writen = False    # Artefacts of trackers
+is_writen = True    # Artefacts of trackers
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
 # 
@@ -148,62 +148,40 @@ def get_center_of_bbox(bbox):
     center_y = int((y1 + y2) / 2)
     return (center_x, center_y)
 
-homoFrames = []
+homoScenes = []
 
-TL = court_keypoints_predictions[0][5]  # 4
-TR = court_keypoints_predictions[0][7]  # ? 6 
-LL = court_keypoints_predictions[0][4]  # ??  5 
-LR = court_keypoints_predictions[0][6]  # 7
+TL = court_keypoints_predictions[0][4]  # 4  5  
+TR = court_keypoints_predictions[0][6]  # ? 6   7
+LL = court_keypoints_predictions[0][5]  # ??  5   4
+LR = court_keypoints_predictions[0][7]  # 7   6
 
-homoFrame, M = matrixs.courtMap(frames[0], *[TL, TR, LL, LR])   # [TL, TR, LL, LR]
+homoScene, M = matrixs.courtMap(frames[0], *[TL, TR, LL, LR])   # [TL, TR, LL, LR]
 
-homoFrame = matrixs.showLines(homoFrame)
+homoScene = matrixs.showLines(homoScene)
 
-
+new_scene = homoScene.copy()
 #           MVP IS READY
 # 
 #   NEXT STEP: TRANSFORM PLAYERS AND BALL COORDINATES TO MINI MAP
 
-# TODO: 2. показывает сразу все позиции на мини-карте
-# Find Center of bbox for every players
-center_players = []
-# Plot players every players on the cort
-for players_coords, ball_coords in zip(player_predictions, ball_predictions):
-    for key, player_coord in players_coords.items():
-        # 
-        player_coord = get_center_of_bbox(player_coord)
-        # 
-        # homoFrame = matrixs.showPoint(homoFrame, M, player_coord)  # [800, 1130])    # homoFrame = matrixs.showPoint(homoFrame, M, [1400, 340])  # UP???
-        points =  matrixs.givePoint(M, player_coord)
-        homoFrame = cv2.circle(homoFrame, center=points, radius=1, color=(0, 0, 255))
-
-    # 
-    # ball_center = get_center_of_bbox(ball_coords)
-    ball_center = np.float32([[ball_coords]]) # Transform to needed format
-    transformed = perspectiveTransform(ball_center, M)[0][0]
-    homoFrame = circle(homoFrame, (int(transformed[0]), int(transformed[1])), radius=2, color=(0, 255, 255), thickness=2)
-        
-    homoFrames.append(homoFrame)
-
-# Watch the result
-output_video_path = "./results/output_homo.mp4"
-save_video(homoFrames, output_video_path)
-
-
-
-
-# 
+#
 class MiniMap:
     def __init__(self) -> None:
         self.coordinates = None
         
-    def convert(self, frames: List)-> List:
-        """ Conver pixels to meters """
-        # some code here
-        return frames
+    # def convert(self, xy: List)-> List:
+    #     """ Conver pixels to meters """
+    #     # some code here
+    #     assert isinstance(xy, List)
+    #     return xy
+    
+    def calculate_homomatrix(self, frame):
+        """ Calculated homography matrix and also return transformed image """
+        pass
     
     def transform(self, frames):
-        # some code here
+        """ Homomatrix transform frames to horizontali point of view """
+        # ... some code here
         assert isinstance(frames, List)
         return frames
 
@@ -245,6 +223,61 @@ print()
 # ball_is_in_out = ball_checker(mini_ball_predictions, mini_ball_bounces)
 
 # self.model = Model
+
+
+# TODO: 2. показывает сразу все позиции на мини-карте
+# Find Center of bbox for every players
+
+# Watch the result
+output_video_path = "./results/output_homo.mp4"
+
+fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+out = cv2.VideoWriter(output_video_path, 
+                     fourcc, 
+                     24, 
+                     (homoScene.shape[1], homoScene.shape[0])
+                     )
+
+center_players = []
+# Plot players every players on the cort
+for i, (players_coords, ball_coords) in enumerate(zip(player_predictions, ball_predictions)):
+    for key, player_coord in players_coords.items():
+        # 
+        player_coord = get_center_of_bbox(player_coord)
+        # 
+        # homoScene = matrixs.showPoint(homoScene, M, player_coord)  # [800, 1130])    # homoScene = matrixs.showPoint(homoScene, M, [1400, 340])  # UP???
+        points =  matrixs.givePoint(M, player_coord)
+        new_scene = cv2.circle(homoScene, center=points, radius=10, color=(0, 0, 255))
+    # 
+    ball_center = np.float32([[ball_coords]]) # Transform to needed format
+    transformed = perspectiveTransform(ball_center, M)[0][0]
+    new_scene = circle(new_scene, (int(transformed[0]), int(transformed[1])), radius=5, color=(0, 255, 255), thickness=2)
+
+    # Ball Bounce positions
+    if i in ball_bounces:
+        new_scene = circle(new_scene, (int(transformed[0]), int(transformed[1])), radius=15, color=(0, 0, 0), thickness=5)
+    
+    out.write(new_scene)
+    # cv2.imwrite("./results/first_homo_img.jpg", new_scene)  # plt.
+
+    homoScenes.append(new_scene)
+
+out.release()
+
+
+# save_video(homoScenes, output_video_path)
+
+
+
+
+save_minimap = True
+
+if save_minimap:
+    pass
+
+# minimap = cv2.resize(minimap, ())
+
+
 """
     На подумать:
       - BallBounce и BallHit и BallCheck - это массив из индексов
@@ -260,8 +293,8 @@ class SpeedEstimator:
         pass
     
     def calculate(self, ball_predections: List):
-        assert type(frames) == List
-
+        assert type(ball_predections) == List
+        pass
     pass
 
 
