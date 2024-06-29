@@ -9,3 +9,4 @@ pytest
 pytest-dependency
 pre-commit
 catboost
+# pydantic

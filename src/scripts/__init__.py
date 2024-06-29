@@ -11,4 +11,4 @@ from src.scripts.HomographyMatrix import HomographyMatrix
 from src.scripts.RemoveShadow import ShadowRemover as RemoveShadow
 from src.scripts.RemoveBadFrames import RemoveBadFrames
 from src.scripts.ShotRecognition import ShotType
-from src.scripts import BallHit, Score, StepCount  
+# from src.scripts import BallHit, Score, StepCount  
