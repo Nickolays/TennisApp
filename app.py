@@ -128,6 +128,7 @@ for i, frame in enumerate(output_video_2):
 
 output_video_path = "./results/output_2.mp4"
 save_video(output_video_2, output_video_path)
+
 # 
 #       Classical Programming and Classical CV
 #    Обработаем выход из модели. 
@@ -139,10 +140,6 @@ import numpy as np
 from cv2 import getPerspectiveTransform, warpPerspective, line, circle, rectangle, perspectiveTransform
 # 
 matrixs = HomographyMatrix()
-
-
-# u = np.array([745, 1720, 470, 2010])
-# v = np.array([350, 350, 1070, 1060])
 
 def get_center_of_bbox(bbox):
     x1, y1, x2, y2 = bbox
