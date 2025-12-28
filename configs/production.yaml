@@ -1,0 +1,116 @@
+# Production Configuration (with Database, API, Monitoring)
+
+video:
+  chunk_size: 500
+  output_dir: "/mnt/storage/tennis_results/"  # Production storage path
+
+execution:
+  mode: "parallel"
+  cpu_workers: 8               # More workers for production server
+  gpu_batch_size: 16
+
+preprocessing:
+  skip_frames: false
+  motion_filter:
+    enabled: true
+    threshold: 5.0
+
+detection:
+  court:
+    enabled: true
+    interval: 30
+
+  ball:
+    enabled: true
+    interval: 1
+
+  player:
+    enabled: true
+    interval: 1
+
+temporal:
+  gap_filling:
+    enabled: true
+
+  smoothing:
+    enabled: true
+
+geometry:
+  homography:
+    interval: 30
+
+events:
+  ball_hit:
+    enabled: true
+    device: "cuda"
+
+  bounce:
+    enabled: true
+
+  in_out:
+    enabled: true
+
+  speed:
+    enabled: true
+
+analytics:
+  game_segmentation:
+    enabled: true
+
+  statistics:
+    enabled: true
+
+  database_export:
+    enabled: true
+    database_type: "postgresql"
+    connection_string: "${DATABASE_URL}"  # From environment variable
+    pool_size: 10
+    pool_timeout: 30
+
+rendering:
+  overlay:
+    draw_court_lines: true
+    draw_ball_trajectory: true
+    draw_player_boxes: true
+    draw_event_markers: true
+
+  minimap:
+    enabled: true
+
+  video_output:
+    codec: "h264"              # Better compression
+    quality: 90
+
+# API Configuration
+api:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4                   # Uvicorn workers
+  redis_url: "redis://localhost:6379/0"
+  job_timeout: 3600            # 1 hour max per video
+  max_upload_size: 2147483648  # 2GB
+
+# Monitoring
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090
+  sentry_dsn: "${SENTRY_DSN}"  # From environment
+
+# Logging
+logging:
+  level: "INFO"
+  file: "/var/log/tennis_pipeline/app.log"
+  rotate: true
+  max_bytes: 10485760          # 10MB
+  backup_count: 5
+
+# Model paths (can use S3/cloud storage in production)
+model_registry:
+  tracknet:
+    class: "app.models.tracknet.TrackNetModel"
+  yolo:
+    class: "app.models.yolo_detector.YOLODetector"
+  ball_hit_classifier:
+    class: "app.models.ball_hit_model.BallHitClassifier"

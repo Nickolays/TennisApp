@@ -1,0 +1,183 @@
+# Default Tennis Analytics Pipeline Configuration
+
+# Video Processing
+video:
+  chunk_size: 500              # Frames per processing chunk
+  output_dir: "results/"
+  save_annotated_video: true
+  save_analytics_json: true
+
+# Parallel Execution
+execution:
+  mode: "parallel"             # "sequential" or "parallel"
+  cpu_workers: 4               # Number of CPU processes
+  gpu_batch_size: 16           # Batch size for GPU inference
+  prefetch_chunks: 2           # Number of chunks to prefetch
+
+# [1] Frame Extraction Pipeline
+preprocessing:
+  skip_frames: false           # Skip every N frames (false = process all)
+  frame_skip_interval: 1       # Only used if skip_frames=true
+
+  motion_filter:
+    enabled: true
+    threshold: 5.0             # Pixel difference threshold
+    smoothing_window: 5        # Temporal smoothing (frames)
+
+# [2] Detection Pipeline (GPU)
+detection:
+  # Court Detection (TrackNet)
+  court:
+    enabled: true
+    model_path: "models/court_model_best.pt"
+    model_type: "tracknet"     # Easily swap: "tracknet" | "custom_cnn"
+    interval: 30               # Detect every N frames (court doesn't move)
+    confidence_threshold: 0.5
+    input_size: [640, 360]     # Model input resolution
+
+  # Ball Detection (TrackNet)
+  ball:
+    enabled: true
+    model_path: "models/ball_model_best.pt"
+    model_type: "tracknet"     # Easily swap models
+    interval: 1                # Every frame
+    confidence_threshold: 0.3
+    input_size: [640, 360]
+
+  # Player Detection (YOLO)
+  player:
+    enabled: true
+    model_path: "models/yolov11n.pt"
+    model_type: "yolo"         # Easily swap: "yolo" | "faster_rcnn" | "detr"
+    interval: 1                # Every frame
+    confidence_threshold: 0.5
+    nms_threshold: 0.4
+
+# [3] Temporal Processing Pipeline (CPU)
+temporal:
+  # Gap Filling
+  gap_filling:
+    enabled: true
+    max_gap_linear: 5          # Use linear interpolation for gaps < 5 frames
+    max_gap_polynomial: 15     # Use polynomial for gaps 5-15 frames
+    max_gap_total: 30          # Discard gaps > 30 frames (likely occlusion)
+
+  # Trajectory Smoothing
+  smoothing:
+    enabled: true
+    method: "kalman"           # "kalman" | "savgol" | "gaussian"
+    kalman_process_noise: 0.1
+    kalman_measurement_noise: 1.0
+
+  # Temporal Windows
+  windows:
+    ball_hit_window: 5         # ±5 frames = 11 total for hit detection
+
+# [4] Geometry Pipeline (CPU)
+geometry:
+  homography:
+    interval: 30               # Compute every N frames (cache for others)
+    court_template: "singles"  # "singles" | "doubles"
+    ransac_threshold: 5.0
+    min_determinant: 0.01      # Reject ill-conditioned matrices
+
+  coordinate_transform:
+    apply_to_ball: true
+    apply_to_players: true
+
+# [5] Event Detection Pipeline
+events:
+  # Ball Hit Detection (ML model)
+  ball_hit:
+    enabled: true
+    model_path: "models/ball_hit_model.pt"
+    model_type: "ball_hit_classifier"  # 11-frame input
+    confidence_threshold: 0.7
+    device: "cuda"             # "cuda" | "cpu"
+
+  # Bounce Detection (physics-based)
+  bounce:
+    enabled: true
+    vertical_acceleration_threshold: 15.0  # m/s²
+    direction_change_threshold: 0.3
+
+  # In/Out Detection
+  in_out:
+    enabled: true
+    boundary_margin: 0.05      # 5cm margin (meters)
+
+  # Speed Calculation
+  speed:
+    enabled: true
+    max_ball_speed: 70.0       # m/s (physics validation)
+    smoothing_window: 3        # Frames
+
+# [6] Analytics Pipeline (CPU)
+analytics:
+  game_segmentation:
+    enabled: true
+    min_rally_frames: 30       # Minimum frames for valid rally
+    idle_threshold: 60         # Frames of inactivity = idle segment
+
+  statistics:
+    enabled: true
+    metrics:
+      - "avg_ball_speed"
+      - "max_ball_speed"
+      - "rally_count"
+      - "rally_duration"
+      - "shot_count_per_player"
+      - "in_out_ratio"
+
+  database_export:
+    enabled: false             # Set to true when DB is configured
+    database_type: "postgresql"  # "postgresql" | "mongodb" | "sqlite"
+    connection_string: "postgresql://user:pass@localhost:5432/tennis_db"
+    table_prefix: "match_"
+
+# [7] Rendering Pipeline (CPU)
+rendering:
+  overlay:
+    draw_court_lines: true
+    draw_ball_trajectory: true
+    draw_player_boxes: true
+    draw_event_markers: true   # Hits, bounces, in/out
+
+    colors:
+      court_lines: [0, 255, 0]      # Green
+      ball_trajectory: [255, 0, 0]  # Red
+      player_boxes: [0, 0, 255]     # Blue
+      hit_marker: [255, 255, 0]     # Yellow
+      bounce_marker: [255, 0, 255]  # Magenta
+
+    line_thickness: 2
+    trajectory_length: 30      # Show last N positions
+
+  minimap:
+    enabled: true
+    position: "bottom_right"   # "top_left" | "top_right" | "bottom_left" | "bottom_right"
+    size: [300, 200]           # Width x Height (pixels)
+    background_color: [34, 139, 34]  # Court green
+
+  video_output:
+    codec: "mp4v"              # "mp4v" | "h264" | "hevc"
+    fps: null                  # null = use input video fps
+    quality: 95                # 0-100
+
+# Model Registry (for easy model swapping)
+model_registry:
+  tracknet:
+    class: "app.models.tracknet.TrackNetModel"
+  yolo:
+    class: "app.models.yolo_detector.YOLODetector"
+  ball_hit_classifier:
+    class: "app.models.ball_hit_model.BallHitClassifier"
+  # FUTURE: Add more models here
+  # faster_rcnn:
+  #   class: "app.models.faster_rcnn.FasterRCNNDetector"
+
+# Logging
+logging:
+  level: "INFO"              # DEBUG | INFO | WARNING | ERROR
+  file: "logs/tennis_pipeline.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

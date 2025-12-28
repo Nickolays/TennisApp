@@ -1,0 +1,63 @@
+# Speed-Optimized Configuration (Lower Quality, Faster Processing)
+
+# Inherits from default.yaml, only override differences
+
+video:
+  chunk_size: 1000             # Larger chunks for better throughput
+
+preprocessing:
+  skip_frames: true
+  frame_skip_interval: 2       # Process every 2nd frame
+
+  motion_filter:
+    enabled: false             # Skip motion filtering for speed
+
+detection:
+  court:
+    interval: 60               # Less frequent court detection
+    input_size: [320, 180]     # Lower resolution
+
+  ball:
+    input_size: [320, 180]
+    interval: 1
+
+  player:
+    model_path: "models/yolov11n.pt"  # Nano model (fastest)
+    input_size: [320, 180]
+
+execution:
+  gpu_batch_size: 32           # Larger batches for throughput
+
+temporal:
+  gap_filling:
+    max_gap_linear: 10         # More aggressive interpolation
+    max_gap_polynomial: 20
+
+  smoothing:
+    enabled: false             # Skip smoothing for speed
+
+events:
+  ball_hit:
+    enabled: false             # Skip ML-based hit detection
+
+  bounce:
+    enabled: true              # Keep physics-based
+
+geometry:
+  homography:
+    interval: 60               # Less frequent homography
+
+rendering:
+  overlay:
+    draw_ball_trajectory: false
+    draw_event_markers: false
+
+  minimap:
+    enabled: false
+
+  video_output:
+    quality: 75                # Lower quality
+
+analytics:
+  database_export:
+    enabled: false
