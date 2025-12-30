@@ -94,6 +94,7 @@ checkpoints/*.pth
 !checkpoints/.gitkeep
 
 # Temporary files
+docs/
 outputs/
 tmp/
 temp/
