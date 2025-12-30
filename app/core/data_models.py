@@ -44,9 +44,31 @@ class FrameDetection:
     
     def has_court(self) -> bool:
         return self.court_keypoints is not None and self.court_confidence > 0.5
-    
+
     def has_ball(self) -> bool:
         return self.ball_position_px is not None and self.ball_confidence > 0.3
+
+    def has_players(self) -> bool:
+        return len(self.player_boxes) > 0
+
+
+@dataclass
+class TemporalWindow:
+    """Temporal window of frames for event detection"""
+    center_frame_id: int
+    frame_ids: List[int]  # All frame IDs in window (e.g., ±5 frames = 11 frames)
+    frames: Optional[List[np.ndarray]] = None  # Actual frame data (if available)
+    ball_positions: List[Optional[Tuple[float, float]]] = field(default_factory=list)
+    center_ball_position: Optional[Tuple[float, float]] = None
+    center_ball_confidence: float = 0.0
+
+    def window_size(self) -> int:
+        """Get window size (half-width)"""
+        return (len(self.frame_ids) - 1) // 2
+
+    def is_complete(self, expected_size: int) -> bool:
+        """Check if window has expected number of frames"""
+        return len(self.frame_ids) == 2 * expected_size + 1
 
 
 @dataclass
@@ -197,17 +219,91 @@ class ProcessingConfig:
 COURT_DIMENSIONS = {
     'length': 23.77,  # Full court length
     'width': 10.97,   # Full court width (doubles)
+    'singles_width': 8.23,  # Singles court width
     'service_line': 6.40,  # Distance from net to service line
     'net_height': 0.914,  # Net height at center
 }
 
 # Standard court keypoints (template for homography)
-# These represent the real-world court coordinates
+# These represent the real-world court coordinates (14 keypoints)
+# Based on standard tennis court layout
 COURT_TEMPLATE_KEYPOINTS = np.array([
-    [0.0, 0.0],                                      # Back-left baseline
-    [COURT_DIMENSIONS['width'], 0.0],                # Back-right baseline
-    [0.0, COURT_DIMENSIONS['length']],               # Front-left baseline
-    [COURT_DIMENSIONS['width'], COURT_DIMENSIONS['length']],  # Front-right baseline
-    [0.0, COURT_DIMENSIONS['service_line']],         # Back-left service line
-    [COURT_DIMENSIONS['width'], COURT_DIMENSIONS['service_line']],  # Back-right service line
+    # Baseline (back)
+    [0.0, 0.0],                                      # 0: Back-left baseline
+    [COURT_DIMENSIONS['width'], 0.0],                # 1: Back-right baseline
+
+    # Service line (back)
+    [0.0, COURT_DIMENSIONS['service_line']],         # 2: Back-left service line
+    [COURT_DIMENSIONS['width'], COURT_DIMENSIONS['service_line']],  # 3: Back-right service line
+
+    # Net line (center)
+    [0.0, COURT_DIMENSIONS['length'] / 2],           # 4: Left net post
+    [COURT_DIMENSIONS['width'], COURT_DIMENSIONS['length'] / 2],  # 5: Right net post
+
+    # Service line (front)
+    [0.0, COURT_DIMENSIONS['length'] - COURT_DIMENSIONS['service_line']],  # 6: Front-left service line
+    [COURT_DIMENSIONS['width'], COURT_DIMENSIONS['length'] - COURT_DIMENSIONS['service_line']],  # 7: Front-right service line
+
+    # Baseline (front)
+    [0.0, COURT_DIMENSIONS['length']],               # 8: Front-left baseline
+    [COURT_DIMENSIONS['width'], COURT_DIMENSIONS['length']],  # 9: Front-right baseline
+
+    # Center service line
+    [COURT_DIMENSIONS['width'] / 2, COURT_DIMENSIONS['service_line']],  # 10: Back center service
+    [COURT_DIMENSIONS['width'] / 2, COURT_DIMENSIONS['length'] / 2],  # 11: Net center
+    [COURT_DIMENSIONS['width'] / 2, COURT_DIMENSIONS['length'] - COURT_DIMENSIONS['service_line']],  # 12: Front center service
+
+    # Singles sidelines (optional, use doubles width for now)
+    [COURT_DIMENSIONS['width'] / 2, 0.0],            # 13: Back center baseline
 ], dtype=np.float32)
+
+
+# Singles court template (narrower than doubles)
+# Singles sidelines are 1.37m inward from doubles sidelines on each side
+SINGLES_SIDELINE_OFFSET = (COURT_DIMENSIONS['width'] - COURT_DIMENSIONS['singles_width']) / 2
+
+COURT_TEMPLATE_KEYPOINTS_SINGLES = np.array([
+    # Baseline (back)
+    [SINGLES_SIDELINE_OFFSET, 0.0],                                      # 0: Back-left baseline
+    [SINGLES_SIDELINE_OFFSET + COURT_DIMENSIONS['singles_width'], 0.0],  # 1: Back-right baseline
+
+    # Service line (back)
+    [SINGLES_SIDELINE_OFFSET, COURT_DIMENSIONS['service_line']],         # 2: Back-left service line
+    [SINGLES_SIDELINE_OFFSET + COURT_DIMENSIONS['singles_width'], COURT_DIMENSIONS['service_line']],  # 3: Back-right service line
+
+    # Net line (center)
+    [SINGLES_SIDELINE_OFFSET, COURT_DIMENSIONS['length'] / 2],           # 4: Left net post
+    [SINGLES_SIDELINE_OFFSET + COURT_DIMENSIONS['singles_width'], COURT_DIMENSIONS['length'] / 2],  # 5: Right net post
+
+    # Service line (front)
+    [SINGLES_SIDELINE_OFFSET, COURT_DIMENSIONS['length'] - COURT_DIMENSIONS['service_line']],  # 6: Front-left service line
+    [SINGLES_SIDELINE_OFFSET + COURT_DIMENSIONS['singles_width'], COURT_DIMENSIONS['length'] - COURT_DIMENSIONS['service_line']],  # 7: Front-right service line
+
+    # Baseline (front)
+    [SINGLES_SIDELINE_OFFSET, COURT_DIMENSIONS['length']],               # 8: Front-left baseline
+    [SINGLES_SIDELINE_OFFSET + COURT_DIMENSIONS['singles_width'], COURT_DIMENSIONS['length']],  # 9: Front-right baseline
+
+    # Center service line
+    [COURT_DIMENSIONS['width'] / 2, COURT_DIMENSIONS['service_line']],  # 10: Back center service
+    [COURT_DIMENSIONS['width'] / 2, COURT_DIMENSIONS['length'] / 2],  # 11: Net center
+    [COURT_DIMENSIONS['width'] / 2, COURT_DIMENSIONS['length'] - COURT_DIMENSIONS['service_line']],  # 12: Front center service
+
+    # Center baseline
+    [COURT_DIMENSIONS['width'] / 2, 0.0],            # 13: Back center baseline
+], dtype=np.float32)
+
+
+def get_court_template(court_type: str = 'doubles') -> np.ndarray:
+    """
+    Get appropriate court template based on court type
+
+    Args:
+        court_type: 'singles' or 'doubles'
+
+    Returns:
+        Court template keypoints (14, 2) array in meters
+    """
+    if court_type == 'singles':
+        return COURT_TEMPLATE_KEYPOINTS_SINGLES
+    else:
+        return COURT_TEMPLATE_KEYPOINTS
