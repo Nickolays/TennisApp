@@ -226,6 +226,17 @@ class PlayerDetectionStep(PipelineStep):
         """
         Filter detected people to keep only active players
 
+        Tennis rules:
+        - Singles: Exactly 2 players (one on each side)
+        - Doubles: Exactly 4 players (two on each side)
+        - One or two players may be far from camera (harder to detect)
+
+        TODO: Future improvement - Divide court into 2 parts (near/far sides)
+              This would help:
+              1. Ensure balanced player distribution (1-2 per side)
+              2. Use different detection thresholds per side (far side more lenient)
+              3. Apply tracking to maintain player count when detection fails
+
         Args:
             boxes: All detected person boxes
             confidences: Detection confidences
@@ -264,8 +275,30 @@ class PlayerDetectionStep(PipelineStep):
         # Sort by score (descending)
         candidates.sort(key=lambda x: x[2], reverse=True)
 
-        # Keep top N players
-        for box, conf, score in candidates[:self.max_players]:
+        # Tennis-specific logic: Prefer 2 or 4 players (singles/doubles)
+        # If we detect 3 players, it's likely a detection error (should be 2 or 4)
+        num_candidates = len(candidates)
+
+        if num_candidates == 0:
+            # No players detected - return empty
+            return [], []
+        elif num_candidates == 1:
+            # Only 1 detected - likely far player missing, keep the 1 we have
+            target_count = 1
+        elif num_candidates == 2:
+            # Perfect for singles
+            target_count = 2
+        elif num_candidates == 3:
+            # Likely error - keep top 2 (probably singles, 1 is false positive)
+            target_count = 2
+        elif num_candidates >= 4:
+            # Keep top 4 for doubles
+            target_count = 4
+        else:
+            target_count = min(num_candidates, self.max_players)
+
+        # Keep top N players based on tennis logic
+        for box, conf, score in candidates[:target_count]:
             filtered_boxes.append(box)
             filtered_confidences.append(conf)
 

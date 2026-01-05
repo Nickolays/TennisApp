@@ -35,6 +35,15 @@ temporal:
   smoothing:
     enabled: true
 
+tracking:
+  players:
+    enabled: true
+    tracker: "bytetrack"
+    track_thresh: 0.5
+    track_buffer: 30
+    match_thresh: 0.8
+    frame_rate: 30
+
 geometry:
   homography:
     interval: 30

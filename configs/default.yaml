@@ -53,6 +53,27 @@ detection:
     confidence_threshold: 0.5
     nms_threshold: 0.4
 
+# [2.5] Object Tracking Pipeline (GPU)
+tracking:
+  # Player Tracking (ByteTrack)
+  players:
+    enabled: true
+    tracker: "bytetrack"       # Tracker algorithm: "bytetrack" | "sort" | "deepsort"
+    track_thresh: 0.5          # High confidence detection threshold
+    track_buffer: 30           # Frames to keep lost tracks (30 frames = 1 second at 30fps)
+    match_thresh: 0.8          # IOU threshold for matching tracks (0.8 = tight matching)
+    min_box_area: 10           # Minimum bounding box area (pixels²)
+    mot20: false               # MOT20 protocol (use False for tennis)
+    frame_rate: 30             # Video frame rate (for track buffer calculation)
+
+  # Ball Tracking (Future - optional)
+  ball:
+    enabled: false             # ByteTrack can also track ball (not needed if TrackNet works well)
+    tracker: "bytetrack"
+    track_thresh: 0.3          # Lower threshold for ball (smaller, harder to detect)
+    track_buffer: 15           # Shorter buffer (ball moves faster)
+    match_thresh: 0.6          # Looser matching (ball moves more between frames)
+
 # [3] Temporal Processing Pipeline (CPU)
 temporal:
   # Gap Filling

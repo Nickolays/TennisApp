@@ -28,6 +28,12 @@ detection:
 execution:
   gpu_batch_size: 32           # Larger batches for throughput
 
+tracking:
+  players:
+    enabled: true              # Keep tracking for player identity
+    track_buffer: 15           # Shorter buffer for speed
+    frame_rate: 30
+
 temporal:
   gap_filling:
     max_gap_linear: 10         # More aggressive interpolation

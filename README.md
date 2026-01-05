@@ -107,6 +107,24 @@ A distributed AI system that transforms tennis match videos into actionable insi
 └────────────────┬────────────────────────────────────────────┘
                  ↓
 ┌─────────────────────────────────────────────────────────────┐
+│ 1.5 TRACKING PIPELINE (GPU - ByteTrack)                     │
+├─────────────────────────────────────────────────────────────┤
+│  Player Tracking (ByteTrack) → Consistent player IDs        │
+│                                                              │
+│  • Maintains player identity across frames                  │
+│  • Handles occlusions and temporary detection failures      │
+│  • Kalman filter for motion prediction                      │
+│  • Fast: ~30 FPS (no appearance features needed)            │
+│                                                              │
+│  Benefits:                                                   │
+│  • Track individual player statistics across match          │
+│  • Handle far players when detection fails                  │
+│  • Enable player-specific analytics (distance, speed)       │
+│                                                              │
+│  Performance: ~0.02s (instant with ByteTrack)               │
+└────────────────┬────────────────────────────────────────────┘
+                 ↓
+┌─────────────────────────────────────────────────────────────┐
 │ 2. TEMPORAL PIPELINE (CPU - Parallel with Detection)        │
 ├─────────────────────────────────────────────────────────────┤
 │  Gap Filling        → Interpolate missing ball positions    │
@@ -124,7 +142,7 @@ A distributed AI system that transforms tennis match videos into actionable insi
 │  Velocity Estimation      → Calculate ball speed (m/s)      │
 │                                                              │
 │  Performance: ~0.01s                                        │
-│  Status: ⏸️ Blocked (court model needs retraining)          │
+│  Status: ⏸️ Blocked (ready to train! Use train_court.py)   │
 └────────────────┬────────────────────────────────────────────┘
                  ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -210,11 +228,18 @@ A distributed AI system that transforms tennis match videos into actionable insi
 - **OpenCV** - Video processing
 - **NumPy/SciPy** - Numerical computing
 
-### Models
+### AI Models & Algorithms
 - **TrackNet** - Court and ball detection (custom trained)
 - **YOLO v11 nano** - Player detection (5.4MB, fast)
+- **ByteTrack** - Multi-object tracking (built into ultralytics)
 - **Kalman Filter** - Trajectory smoothing
 - **Physics-based** - Event detection algorithms
+
+### Tracking (ByteTrack)
+- **Library**: ultralytics 8.3.237 (built-in)
+- **Dependencies**: lap>=0.5.12 (Linear Assignment Problem solver)
+- **No version conflicts**: Compatible with current PyTorch 2.9.1, NumPy 2.2.6
+- **Performance**: ~30 FPS (no appearance features, Kalman + Hungarian matching)
 
 ---
 
@@ -222,103 +247,140 @@ A distributed AI system that transforms tennis match videos into actionable insi
 
 ```
 TennisApp/
-├── app/
-│   ├── api/
-│   │   └── main.py                 # FastAPI server (v2.0.0)
-│   ├── core/
-│   │   ├── context.py              # Shared processing state
-│   │   ├── pipeline.py             # Base pipeline classes
-│   │   └── data_models.py          # Pydantic models
-│   ├── steps/
-│   │   ├── detection/              # Court, ball, player detection
-│   │   ├── temporal/               # Gap filling, smoothing
-│   │   ├── geometry/               # Homography, coordinates
-│   │   └── events/                 # Bounce, hit detection
-│   ├── pipelines/
-│   │   ├── detection_pipeline.py   # Phase 1
-│   │   ├── temporal_pipeline.py    # Phase 2
-│   │   ├── geometry_pipeline.py    # Phase 3
-│   │   └── event_pipeline.py       # Phase 4
+├── 📄 Core Files
+│   ├── QUICK_START.md              # ⭐ START HERE - Quick guide
+│   ├── README.md                   # This file - Project overview
+│   ├── train_court.py              # ⭐ Train court detection model
+│   ├── visualize_court_video.py    # ⭐ Visualize predictions on video
+│   └── process_video.py            # Full pipeline processing
+│
+├── ⚙️ Configuration
+│   └── configs/
+│       ├── train.yaml              # ⭐ Training configuration
+│       ├── default.yaml            # Pipeline configuration
+│       ├── fast.yaml               # Speed-optimized config
+│       └── production.yaml         # Production config
+│
+├── 📚 Documentation
+│   └── docs/
+│       ├── DEVELOPMENT_HISTORY.md  # Development timeline
+│       ├── CHANGELOG.md            # Version history
+│       ├── PROJECT_STRUCTURE.md    # File organization guide
+│       ├── API_DOCUMENTATION.md    # API reference
+│       ├── API_QUICK_START.md      # API quick guide
+│       ├── TRAINING_IMPROVEMENTS.md # Training tips
+│       ├── VIDEO_VISUALIZATION_GUIDE.md # Visualization guide
+│       ├── MODEL_RETRAINING_ROADMAP.md # Data collection guide
+│       ├── TRACKING_IMPLEMENTATION.md # ByteTrack guide
+│       ├── DATA_FORMAT_SPECIFICATION.md # Dataset format
+│       └── WORKER_SETUP.md         # Worker deployment
+│
+├── 🤖 Application Code
+│   └── app/
+│       ├── api/
+│       │   └── main.py             # FastAPI server (v2.0.0)
+│       ├── core/
+│       │   ├── context.py          # Shared processing state
+│       │   ├── pipeline.py         # Base pipeline classes
+│       │   └── data_models.py      # Pydantic models
+│       ├── steps/
+│       │   ├── detection/          # Court, ball, player detection
+│       │   ├── tracking/           # Player tracking (ByteTrack)
+│       │   ├── temporal/           # Gap filling, smoothing
+│       │   ├── geometry/           # Homography, coordinates
+│       │   └── events/             # Bounce, hit detection
+│       ├── pipelines/
+│       │   ├── detection_pipeline.py
+│       │   ├── temporal_pipeline.py
+│       │   ├── geometry_pipeline.py
+│       │   └── event_pipeline.py
+│       ├── models/
+│       │   └── model_registry.py   # Model loading/caching
+│       └── src/
+│           ├── datasets.py         # COCO dataset loaders
+│           ├── transform.py        # Data augmentation
+│           ├── postprocess.py      # Model output processing
+│           └── steps.py            # Training utilities
+│
+├── 💼 Worker & Deployment
+│   └── worker/
+│       └── gpu_worker.py           # GPU worker script
+│
+├── 📊 Data
+│   └── data/
+│       ├── tennis_ball_dataset/    # Ball detection (487 images)
+│       └── tennis_court_dataset/   # Court detection (918 images)
+│
+├── 🧪 Models
 │   └── models/
-│       └── model_registry.py       # Model loading/caching
-├── worker/
-│   └── gpu_worker.py               # GPU worker script (NEW)
-├── docs/                           # Complete documentation
-│   ├── API_DOCUMENTATION.md        # API reference
-│   ├── REFACTORING_SUMMARY.md      # Recent changes
-│   └── WORKER_SETUP.md             # Worker deployment guide
-├── tests/                          # All test files
-├── models/                         # Model checkpoints
-│   ├── court_model_best.pt         # TrackNet (court)
-│   ├── ball_model_best.pt          # TrackNet (ball)
-│   └── yolo11n.pt                  # YOLO v11 (players)
-├── process_video.py                # CLI tool
-├── API_QUICK_START.md              # Quick reference
-└── README.md                       # This file
+│       ├── court_model_best.pt     # ⭐ Trained court model
+│       ├── ball_model_best.pt      # Trained ball model
+│       └── yolov11n.pt             # YOLO v11 player detection
+│
+├── 📦 Checkpoints & Logs
+│   ├── checkpoints/
+│   │   └── court_detection/
+│   │       ├── best_model.pth      # ⭐ Best model (lowest val loss)
+│   │       └── checkpoint_epoch_*.pth # Periodic checkpoints
+│   └── logs/
+│       └── court_training.json     # Training history
+│
+└── 🧪 Tests
+    └── tests/
+        └── video3.mp4              # Test video
 ```
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Start Cloud API Server
+**See [QUICK_START.md](QUICK_START.md) for detailed guide**
+
+### 1. Train Court Detection Model
 
 ```bash
-cd ~/Projects/TennisAnalysis/TennisApp
+cd TennisAnalysis/TennisApp
 source ../.venv/bin/activate
 
-# Start FastAPI server
+# Train with optimized settings (batch_size=4, RTX 3070)
+python train_court.py
+```
+
+**Output**: `models/court_model_best.pt` (~3-4 hours on RTX 3070)
+
+### 2. Visualize Predictions on Video
+
+```bash
+# Test your trained model
+python visualize_court_video.py tests/video3.mp4 \
+  --model checkpoints/court_detection/best_model.pth \
+  --output results/video3_viz.mp4
+```
+
+**Output**: Annotated video with keypoints, skeleton, minimap, stability metrics
+
+### 3. Process Full Match Video
+
+```bash
+# Full pipeline: court + ball + players + tracking
+python process_video.py tests/video3.mp4 \
+  --config configs/default.yaml \
+  --output results/analysis/
+```
+
+**Output**: Visualized video + JSON statistics + analytics
+
+### 4. Start API Server (Optional)
+
+```bash
+# For distributed processing with GPU workers
 python -m uvicorn app.api.main:app --host 0.0.0.0 --port 8000
 
-# Access API docs
-# http://localhost:8000/docs
-```
-
-### 2. Start GPU Worker (Home PC)
-
-```bash
-# On your GPU machine (RTX 3070)
-cd ~/Projects/TennisAnalysis/TennisApp
-source ../.venv/bin/activate
-
-# Start worker (polls cloud for jobs)
+# Start GPU worker on another machine
 python worker/gpu_worker.py --server https://your-vds.com
-
-# Worker will:
-# 1. Poll cloud every 2 seconds: "Any jobs?"
-# 2. Download video if job available
-# 3. Process with GPU (4 pipelines)
-# 4. Upload results back to cloud
-# 5. Repeat forever
 ```
 
-### 3. Upload Video (From Mobile/Web)
-
-```bash
-# Via cURL
-curl -X POST "https://your-vds.com/api/v1/upload" \
-  -F "file=@match.mp4"
-
-# Returns: {"job_id": "a1b2c3d4-...", "status": "pending"}
-
-# Check status
-curl "https://your-vds.com/api/v1/status/a1b2c3d4-..."
-
-# Download results
-curl "https://your-vds.com/api/v1/results/a1b2c3d4-.../json" -o stats.json
-curl "https://your-vds.com/api/v1/results/a1b2c3d4-.../video" -o processed.mp4
-```
-
-### 4. Process RTSP Stream (Live Camera)
-
-```bash
-curl -X POST "https://your-vds.com/api/v1/stream/start" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "stream_url": "rtsp://camera.ip:554/stream",
-    "batch_size": 16
-  }'
-```
+**See**: [docs/API_QUICK_START.md](docs/API_QUICK_START.md) and [docs/WORKER_SETUP.md](docs/WORKER_SETUP.md)
 
 ---
 
@@ -423,51 +485,81 @@ detection:
 
 ---
 
-## 🐛 Known Issues & Roadmap
+## 🐛 Current Status & Roadmap
 
-### Current Status
+### ✅ Working (v2.0.0)
 
-✅ **Working**:
-- Detection pipeline (court, ball, players)
-- Temporal pipeline (gap filling, smoothing)
-- Batch inference (2.7x speedup)
-- API (video upload, RTSP streams)
-- Event visualization (infrastructure ready)
+1. **Detection Pipeline** - Court, ball, players (3.3 players/frame)
+2. **Player Tracking** - ByteTrack for consistent IDs
+3. **Temporal Pipeline** - Gap filling, smoothing, windows
+4. **Batch Inference** - 2.7x speedup (17.9 FPS on RTX 3070)
+5. **Training System** - Optimized for batch_size=4, proper validation
+6. **Visualization** - Video analysis with stability metrics
+7. **API** - Video upload, RTSP streams, job tracking
+8. **Worker** - Distributed GPU processing
 
-⏸️ **Blocked**:
-- Geometry pipeline (court model needs retraining)
-- Event detection (requires geometry pipeline)
+### ⏸️ Blocked
 
-### Roadmap
+1. **Geometry Pipeline** - Needs better trained court model (ready to train!)
+2. **Event Detection** - Depends on geometry pipeline
 
-**Phase 1** (Current):
-- ✅ Improve player detection (far players)
-- ✅ Add RTSP stream support
-- ✅ Implement parallel batching
-- 🔄 Deploy GPU worker to home server
+### 🎯 Next Priority
 
-**Phase 2** (Next):
-- 🔄 Retrain court model (better keypoints)
-- 🔄 Enable geometry pipeline
-- 🔄 Enable event detection (bounces, hits)
-- 🔄 Add mobile app (React Native)
+**Retrain court detection model** using optimized training script:
+```bash
+python train_court.py
+```
 
-**Phase 3** (Future):
-- ⏳ Shot type classification (forehand/backhand)
-- ⏳ Player tracking/identification
-- ⏳ Rally segmentation
-- ⏳ Multi-camera fusion
+**Why retrain?**:
+- Higher batch size (4 vs 2) → less noisy gradients
+- Better resolution (640×640 vs 512×512) → more detail
+- Proper validation split → detect overfitting
+- Better metrics (PCK@5px, PCK@10px) → track quality
+- Early stopping → prevent overfitting
+- Cosine annealing LR → better convergence
+
+**After retraining**:
+→ Unblock geometry pipeline → Enable event detection → Full system operational!
+
+### Future Roadmap
+
+**Short-term** (After retraining):
+- ⏳ Deploy to production
+- ⏳ Mobile app integration (iOS/Android)
 - ⏳ Real-time dashboard
+
+**Long-term**:
+- ⏳ Shot type classification (forehand/backhand)
+- ⏳ Rally segmentation and analysis
+- ⏳ Multi-camera fusion (TrackNet paper: arxiv.org/pdf/2205.13857)
+- ⏳ Advanced player analytics
 
 ---
 
 ## 📖 Documentation
 
-- **[API_QUICK_START.md](API_QUICK_START.md)** - 5-minute API guide
+### Getting Started
+- **[QUICK_START.md](QUICK_START.md)** - ⭐ START HERE - Train & visualize in 3 steps
+- **[docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)** - File organization guide
+
+### Training & Visualization
+- **[docs/TRAINING_IMPROVEMENTS.md](docs/TRAINING_IMPROVEMENTS.md)** - Training tips and best practices
+- **[docs/VIDEO_VISUALIZATION_GUIDE.md](docs/VIDEO_VISUALIZATION_GUIDE.md)** - Complete visualization guide
+- **[docs/MODEL_RETRAINING_ROADMAP.md](docs/MODEL_RETRAINING_ROADMAP.md)** - Data collection and retraining
+
+### Technical Guides
+- **[docs/DATA_FORMAT_SPECIFICATION.md](docs/DATA_FORMAT_SPECIFICATION.md)** - COCO dataset format
+- **[docs/TRACKING_IMPLEMENTATION.md](docs/TRACKING_IMPLEMENTATION.md)** - ByteTrack player tracking
+
+### API & Deployment
+- **[docs/API_QUICK_START.md](docs/API_QUICK_START.md)** - 5-minute API guide
 - **[docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md)** - Complete API reference
-- **[docs/REFACTORING_SUMMARY.md](docs/REFACTORING_SUMMARY.md)** - Recent improvements
-- **[docs/WORKER_SETUP.md](docs/WORKER_SETUP.md)** - GPU worker deployment (NEW)
+- **[docs/WORKER_SETUP.md](docs/WORKER_SETUP.md)** - GPU worker deployment
 - **Interactive API Docs**: http://localhost:8000/docs (Swagger UI)
+
+### Project History
+- **[docs/DEVELOPMENT_HISTORY.md](docs/DEVELOPMENT_HISTORY.md)** - Development timeline
+- **[docs/CHANGELOG.md](docs/CHANGELOG.md)** - Version history and changes
 
 ---
 

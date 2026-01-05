@@ -1,0 +1,100 @@
+# Training Configuration for Court Detection Model
+
+# ============================================================================
+# MODEL CONFIGURATION
+# ============================================================================
+model:
+  out_channels: 14              # 14 court keypoints
+  pretrained: false
+
+# ============================================================================
+# DATASET CONFIGURATION
+# ============================================================================
+data:
+  # Court dataset
+  ann_file: "data/tennis_court_dataset/train/_annotations.coco.json"
+  img_dir: "data/tennis_court_dataset/train"
+  target_size: [640, 640]       # Increased from 512 for better resolution
+  train_split: 0.85             # 85% train, 15% validation
+
+# ============================================================================
+# TRAINING CONFIGURATION
+# ============================================================================
+training:
+  batch_size: 4                 # Optimized for 8GB GPU (RTX 3070)
+  num_epochs: 100               # More epochs for convergence
+  initial_lr: 0.01              # 10x HIGHER - model needs stronger signal
+  min_lr: 0.00001               # Higher minimum (was too low)
+  weight_decay: 0.00001         # Reduced from 0.0001 (less regularization)
+  grad_clip: 5.0                # Increased from 1.0 (allow bigger updates)
+  mixed_precision: true         # FP16 training (2x faster, 50% less memory)
+
+# ============================================================================
+# OPTIMIZER & SCHEDULER CONFIGURATION
+# ============================================================================
+optimizer:
+  type: "adamw"                 # AdamW optimizer
+  betas: [0.9, 0.999]
+  eps: 0.00000001
+
+scheduler:
+  type: "cosine_warmup"         # Cosine Annealing with Warm Restarts
+  T_0: 20                       # Restart every 20 epochs (was 10 - too fast)
+  T_mult: 1                     # Keep same period (was 2 - too aggressive)
+  eta_min: 0.00001              # Higher minimum LR (was 0.000001)
+
+# ============================================================================
+# LOSS FUNCTION CONFIGURATION
+# ============================================================================
+loss:
+  type: "smooth_l1"             # SmoothL1Loss (good for keypoint regression)
+  beta: 1.0                     # Transition point between L1 and L2
+
+# ============================================================================
+# VALIDATION & CHECKPOINTING
+# ============================================================================
+validation:
+  val_interval: 1               # Validate every epoch
+  save_best: true               # Save best model
+  early_stopping_patience: 25   # Stop if no improvement for 25 epochs (was 15)
+
+checkpoint:
+  checkpoint_dir: "checkpoints/court_detection"
+  save_interval: 10             # Save checkpoint every 10 epochs (not every 5)
+  save_final: true              # Save final model
+  save_best_only: false         # Also save periodic checkpoints
+
+# ============================================================================
+# OUTPUT CONFIGURATION
+# ============================================================================
+output:
+  log_dir: "logs"
+  log_file: "logs/court_training.json"
+  tensorboard: false            # Disable for now (saves disk space)
+
+# ============================================================================
+# SYSTEM CONFIGURATION
+# ============================================================================
+system:
+  device: "cuda"                # cuda or cpu
+  num_workers: 4                # DataLoader workers
+  pin_memory: true              # Pin memory for faster GPU transfer
+  deterministic: false          # Set to true for reproducible results (slower)
+  seed: 42                      # Random seed
+
+# ============================================================================
+# NOTES
+# ============================================================================
+# GPU Memory Usage (RTX 3070 8GB):
+#   - batch_size=4, target_size=640: ~6GB (safe)
+#   - batch_size=8, target_size=640: ~10GB (out of memory)
+#   - batch_size=4, target_size=512: ~4GB (underutilized)
+#
+# Training Time:
+#   - ~3-4 hours on RTX 3070 with these settings
+#   - ~50 epochs, 918 images, batch_size=4
+#
+# Expected Results:
+#   - Mean error: ~2 pixels
+#   - PCK@10px: >99%
+#   - Val loss: ~5

@@ -41,6 +41,7 @@ class FrameDetection:
     # Player detections
     player_boxes: List[Tuple[float, float, float, float]] = field(default_factory=list)  # [(x1,y1,x2,y2), ...]
     player_confidences: List[float] = field(default_factory=list)
+    player_track_ids: List[int] = field(default_factory=list)  # Track IDs from ByteTrack (matches player_boxes order)
     
     def has_court(self) -> bool:
         return self.court_keypoints is not None and self.court_confidence > 0.5
