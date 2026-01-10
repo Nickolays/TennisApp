@@ -42,13 +42,14 @@ class TrackNet(nn.Module):
         self.ups3 = nn.Upsample(scale_factor=2)
         self.conv16 = ConvBlock(in_channels=128, out_channels=64)
         self.conv17 = ConvBlock(in_channels=64, out_channels=64)
+        # Final layer: ConvBlock with ReLU (same as notebook)
         self.conv18 = ConvBlock(in_channels=64, out_channels=self.out_channels)
 
         self._init_weights()
-                  
+
     def forward(self, x):
         x = self.conv1(x)
-        x = self.conv2(x)    
+        x = self.conv2(x)
         x = self.pool1(x)
         x = self.conv3(x)
         x = self.conv4(x)
@@ -71,12 +72,16 @@ class TrackNet(nn.Module):
         x = self.conv16(x)
         x = self.conv17(x)
         x = self.conv18(x)
+
+        # Output raw heatmaps (after ReLU from conv18)
+        # No sigmoid - soft-argmax works directly on these values
         return x
     
     def _init_weights(self):
         for module in self.modules():
             if isinstance(module, nn.Conv2d):
-                nn.init.uniform_(module.weight, -0.05, 0.05)
+                # Use Kaiming initialization for ReLU activations
+                nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0)
 

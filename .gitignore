@@ -175,3 +175,5 @@ cython_debug/
 
 # Keep directory structure but ignore contents
 # (add .gitkeep files to empty directories you want to track)
+
+CLAUDE.md

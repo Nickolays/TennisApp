@@ -7,10 +7,12 @@ import torch.nn.functional as F
 
 def safe_collate(batch):
     """Fixes negative stride numpy arrays by copying before tensor conversion."""
-    imgs, kps, names = zip(*batch)
-    imgs = [torch.tensor(np.ascontiguousarray(img)) for img in imgs]
-    kps = [torch.tensor(np.ascontiguousarray(kp)) for kp in kps]
-    return torch.stack(imgs), torch.stack(kps), names
+    # Dataset returns: (imgs, heatmaps, keypoints, names)
+    imgs, heatmaps, kps, names = zip(*batch)
+    imgs = [torch.tensor(np.ascontiguousarray(img)) if isinstance(img, np.ndarray) else img for img in imgs]
+    heatmaps = [torch.tensor(np.ascontiguousarray(hm)) if isinstance(hm, np.ndarray) else hm for hm in heatmaps]
+    kps = [torch.tensor(np.ascontiguousarray(kp)) if isinstance(kp, np.ndarray) else kp for kp in kps]
+    return torch.stack(imgs), torch.stack(heatmaps), torch.stack(kps), names
 
 # Example DataLoader usage:
 # train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=4, collate_fn=safe_collate)

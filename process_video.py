@@ -29,13 +29,14 @@ from app.pipelines.event_pipeline import EventPipeline
 from app.core.data_models import FrameDetection
 
 
-def process_video_simple(video_path: str, max_frames: int = None):
+def process_video_simple(video_path: str, max_frames: int = None, config: dict = None):
     """
     Process video with Detection + Temporal pipeline
 
     Args:
         video_path: Path to video
         max_frames: Maximum frames to process (None = all)
+        config: Configuration dictionary (None = use defaults)
     """
     print("="*80)
     print("TENNIS VIDEO PROCESSING")
@@ -67,18 +68,40 @@ def process_video_simple(video_path: str, max_frames: int = None):
     frames_to_process = min(max_frames, total_frames) if max_frames else total_frames
     print(f"  Processing: {frames_to_process} frames")
 
-    # Check models
-    base_path = Path(__file__).parent
-    court_model = base_path / 'models/court_model_best.pt'
-    ball_model = base_path / 'models/ball_model_best.pt'
-
-    if not court_model.exists():
-        print(f"\n❌ Court model not found: {court_model}")
+    # Get model paths from config - NO hardcoded paths!
+    # IMPORTANT: Keep paths relative - they resolve correctly from CWD
+    if not config or 'detection' not in config:
+        print("\n❌ Config file required! No hardcoded model paths.")
+        print("   Please provide config file with --config flag")
+        print("   Example: python process_video.py video.mp4 --config configs/default.yaml")
         cap.release()
         return None
 
-    if not ball_model.exists():
-        print(f"\n❌ Ball model not found: {ball_model}")
+    court_model_path = config['detection']['court']['model_path']
+    ball_model_path = config['detection']['ball']['model_path']
+    player_model_path = config['detection']['player']['model_path']
+
+    print(f"\nModel Configuration:")
+    print(f"  Court: {court_model_path}")
+    print(f"  Ball: {ball_model_path}")
+    print(f"  Player: {player_model_path}")
+
+    # Verify files exist (using relative paths from CWD)
+    if not Path(court_model_path).exists():
+        print(f"\n❌ Court model not found: {court_model_path}")
+        print(f"   Current directory: {Path.cwd()}")
+        cap.release()
+        return None
+
+    if not Path(ball_model_path).exists():
+        print(f"\n❌ Ball model not found: {ball_model_path}")
+        print(f"   Current directory: {Path.cwd()}")
+        cap.release()
+        return None
+
+    if not Path(player_model_path).exists():
+        print(f"\n❌ Player model not found: {player_model_path}")
+        print(f"   Current directory: {Path.cwd()}")
         cap.release()
         return None
 
@@ -138,7 +161,7 @@ def process_video_simple(video_path: str, max_frames: int = None):
         steps=[
             CourtDetectionStep({
                 'enabled': True,
-                'model_path': str(court_model),
+                'model_path': court_model_path,  # Use relative path string
                 'model_type': 'tracknet',
                 'interval': 30,
                 'confidence_threshold': 0.5,
@@ -146,7 +169,7 @@ def process_video_simple(video_path: str, max_frames: int = None):
             }),
             BallDetectionStep({
                 'enabled': True,
-                'model_path': str(ball_model),
+                'model_path': ball_model_path,  # Use relative path string
                 'model_type': 'tracknet',
                 'interval': 1,
                 'confidence_threshold': 0.3,
@@ -154,7 +177,7 @@ def process_video_simple(video_path: str, max_frames: int = None):
             }),
             PlayerDetectionStep({
                 'enabled': True,
-                'model_path': 'models/yolo11n.pt',
+                'model_path': player_model_path,  # Use relative path string
                 'confidence_threshold': 0.35,  # Lower to catch far players
                 'interval': 1,
                 'input_size': [640, 640],
@@ -207,6 +230,52 @@ def process_video_simple(video_path: str, max_frames: int = None):
     context = event_pipeline.run(context)
 
     return context
+
+
+def create_court_visualization(width=400, height=800):
+    """Create bird's-eye view court template"""
+    # Tennis court is 23.77m long, 10.97m wide (doubles)
+    court_img = np.ones((height, width, 3), dtype=np.uint8) * 34  # Dark green background
+
+    # Scale: court dimensions to image pixels
+    scale_x = width / 10.97  # pixels per meter (width)
+    scale_y = height / 23.77  # pixels per meter (length)
+
+    # Court lines (white)
+    line_color = (255, 255, 255)
+    line_thickness = 2
+
+    # Outer boundaries (doubles)
+    cv2.rectangle(court_img, (0, 0), (width-1, height-1), line_color, line_thickness)
+
+    # Singles sidelines (1.37m inside doubles lines on each side)
+    singles_offset = int(1.37 * scale_x)
+    cv2.line(court_img, (singles_offset, 0), (singles_offset, height-1), line_color, 1)
+    cv2.line(court_img, (width-singles_offset-1, 0), (width-singles_offset-1, height-1), line_color, 1)
+
+    # Service lines (6.40m from net)
+    service_y_back = int(6.40 * scale_y)
+    service_y_front = height - service_y_back
+    cv2.line(court_img, (0, service_y_back), (width-1, service_y_back), line_color, line_thickness)
+    cv2.line(court_img, (0, service_y_front), (width-1, service_y_front), line_color, line_thickness)
+
+    # Net (center line)
+    net_y = height // 2
+    cv2.line(court_img, (0, net_y), (width-1, net_y), line_color, line_thickness)
+
+    # Center service line
+    center_x = width // 2
+    cv2.line(court_img, (center_x, service_y_back), (center_x, service_y_front), line_color, line_thickness)
+
+    return court_img, scale_x, scale_y
+
+
+def transform_point_to_court_viz(point_court, scale_x, scale_y):
+    """Transform court coordinates (meters) to visualization image pixels"""
+    x_meters, y_meters = point_court
+    x_px = int(x_meters * scale_x)
+    y_px = int(y_meters * scale_y)
+    return (x_px, y_px)
 
 
 def save_results(context: ProcessingContext, output_dir: Path):
@@ -281,13 +350,22 @@ def save_results(context: ProcessingContext, output_dir: Path):
 
     print(f"✓ JSON results: {json_path}")
 
-    # 2. Save visualization video
+    # 2. Save visualization video with bird's-eye court view
     video_path = output_dir / f"{video_name}_visualized.mp4"
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    writer = cv2.VideoWriter(str(video_path), fourcc, context.fps, (context.width, context.height))
+    # Create bird's-eye court template
+    court_viz_width = 400
+    court_viz_height = 800
+    court_template, scale_x, scale_y = create_court_visualization(court_viz_width, court_viz_height)
 
-    print(f"\nCreating visualization video...")
+    # Combine original video + bird's-eye court side by side
+    combined_width = context.width + court_viz_width
+    combined_height = max(context.height, court_viz_height)
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(str(video_path), fourcc, context.fps, (combined_width, combined_height))
+
+    print(f"\nCreating visualization video with homography transform...")
 
     for i, (frame, det) in enumerate(zip(context.frames, context.detections)):
         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR).copy()
@@ -295,6 +373,10 @@ def save_results(context: ProcessingContext, output_dir: Path):
         # Check if this frame has events
         is_bounce = det.frame_id in context.bounce_events
         is_hit = det.frame_id in context.hit_events
+
+        # Get homography for this frame
+        H = context.homography_cache.get(det.frame_id, None)
+        has_homography = H is not None
 
         # Draw court keypoints (green dots)
         if det.court_keypoints is not None:
@@ -373,7 +455,65 @@ def save_results(context: ProcessingContext, output_dir: Path):
         cv2.putText(frame_bgr, f"Players: {len(det.player_boxes)}", (250, 85),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 100, 0) if det.has_players() else (100, 100, 100), 2)
 
-        writer.write(frame_bgr)
+        # Create bird's-eye court view for this frame
+        court_frame = court_template.copy()
+
+        if has_homography:
+            # Transform ball position to court coordinates
+            if det.ball_position_px:
+                try:
+                    # cv2.perspectiveTransform requires shape (1, 1, 2)
+                    ball_px = np.array([[[det.ball_position_px[0], det.ball_position_px[1]]]], dtype=np.float32)
+                    ball_court = cv2.perspectiveTransform(ball_px, H)[0][0]
+
+                    # Draw ball on bird's-eye court
+                    ball_viz_pos = transform_point_to_court_viz(ball_court, scale_x, scale_y)
+                    if 0 <= ball_viz_pos[0] < court_viz_width and 0 <= ball_viz_pos[1] < court_viz_height:
+                        if is_bounce:
+                            cv2.circle(court_frame, ball_viz_pos, 12, (0, 100, 255), -1)  # Red bounce
+                        elif is_hit:
+                            cv2.circle(court_frame, ball_viz_pos, 12, (0, 255, 0), -1)  # Green hit
+                        else:
+                            cv2.circle(court_frame, ball_viz_pos, 10, (0, 255, 255), -1)  # Yellow normal
+                except Exception as e:
+                    pass  # Skip this ball if transformation fails
+
+            # Transform player positions (use bottom-center of bounding box as feet position)
+            if det.has_players():
+                for idx, box in enumerate(det.player_boxes):
+                    try:
+                        x1, y1, x2, y2 = box
+                        # cv2.perspectiveTransform requires shape (1, 1, 2)
+                        player_px = np.array([[[(x1 + x2) / 2, y2]]], dtype=np.float32)
+                        player_court = cv2.perspectiveTransform(player_px, H)[0][0]
+
+                        # Draw player on bird's-eye court
+                        player_viz_pos = transform_point_to_court_viz(player_court, scale_x, scale_y)
+                        if 0 <= player_viz_pos[0] < court_viz_width and 0 <= player_viz_pos[1] < court_viz_height:
+                            cv2.circle(court_frame, player_viz_pos, 15, (255, 100, 0), -1)  # Blue player
+                            cv2.putText(court_frame, f"P{idx+1}", (player_viz_pos[0]-10, player_viz_pos[1]+5),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                    except Exception as e:
+                        pass  # Skip this player if transformation fails
+
+            # Add "Homography: ON" label
+            cv2.putText(court_frame, "Bird's-Eye View", (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(court_frame, "Homography: ON", (10, 60),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        else:
+            # No homography available
+            cv2.putText(court_frame, "Bird's-Eye View", (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(court_frame, "Homography: OFF", (10, 60),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+        # Combine original frame + bird's-eye court side by side
+        combined_frame = np.zeros((combined_height, combined_width, 3), dtype=np.uint8)
+        combined_frame[:context.height, :context.width] = frame_bgr
+        combined_frame[:court_viz_height, context.width:] = court_frame
+
+        writer.write(combined_frame)
 
         if (i + 1) % 50 == 0:
             print(f"  Rendered {i + 1}/{len(context.frames)} frames...")
@@ -389,11 +529,24 @@ def main():
     parser.add_argument('video', help='Path to video file')
     parser.add_argument('--max-frames', type=int, default=None, help='Max frames to process')
     parser.add_argument('--output', '-o', default='results/', help='Output directory')
+    parser.add_argument('--config', '-c', default='configs/default.yaml', help='Path to config file')
 
     args = parser.parse_args()
 
+    # Load config
+    import yaml
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"\n❌ Config file not found: {config_path}")
+        print(f"   Using default model paths from code")
+        config = None
+    else:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        print(f"✓ Loaded config: {config_path}")
+
     # Process video
-    context = process_video_simple(args.video, args.max_frames)
+    context = process_video_simple(args.video, args.max_frames, config)
 
     if context is None:
         print("\n❌ Processing failed!")

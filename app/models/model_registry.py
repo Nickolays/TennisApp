@@ -227,6 +227,28 @@ class YOLOModelWrapper:
         # Convert to absolute path to avoid YOLO auto-download
         model_path_abs = str(Path(model_path).resolve())
 
+        # Debug: Check if file exists before loading
+        if not Path(model_path_abs).exists():
+            # Try relative to TennisApp directory
+            from pathlib import Path as P
+            import os
+            cwd = os.getcwd()
+            alt_path = P(cwd) / model_path
+            print(f"[YOLOModel] WARNING: Original path not found: {model_path_abs}")
+            print(f"[YOLOModel] Current working directory: {cwd}")
+            print(f"[YOLOModel] Trying alternative: {alt_path}")
+
+            if alt_path.exists():
+                model_path_abs = str(alt_path.resolve())
+                print(f"[YOLOModel] ✓ Found at: {model_path_abs}")
+            else:
+                raise FileNotFoundError(
+                    f"YOLO model not found at:\n"
+                    f"  Original: {Path(model_path).resolve()}\n"
+                    f"  Alternative: {alt_path}\n"
+                    f"  CWD: {cwd}"
+                )
+
         # Load YOLO model (absolute path prevents auto-download)
         self.model = YOLO(model_path_abs)
         self.model.to(device)

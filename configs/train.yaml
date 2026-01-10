@@ -14,20 +14,22 @@ data:
   # Court dataset
   ann_file: "data/tennis_court_dataset/train/_annotations.coco.json"
   img_dir: "data/tennis_court_dataset/train"
-  target_size: [640, 640]       # Increased from 512 for better resolution
+  target_size: [512, 512]       # Same as notebook (working configuration)
   train_split: 0.85             # 85% train, 15% validation
 
 # ============================================================================
 # TRAINING CONFIGURATION
 # ============================================================================
 training:
-  batch_size: 4                 # Optimized for 8GB GPU (RTX 3070)
-  num_epochs: 100               # More epochs for convergence
-  initial_lr: 0.01              # 10x HIGHER - model needs stronger signal
-  min_lr: 0.00001               # Higher minimum (was too low)
-  weight_decay: 0.00001         # Reduced from 0.0001 (less regularization)
-  grad_clip: 5.0                # Increased from 1.0 (allow bigger updates)
-  mixed_precision: true         # FP16 training (2x faster, 50% less memory)
+  batch_size: 2                 # Same as notebook (limited by GPU memory)
+  accumulation_steps: 8         # Effective batch size = 2 * 8 = 16
+  num_epochs: 10                # Reduced for testing stability
+  initial_lr: 0.0002            # Reduced from 0.0005 but not too low
+  min_lr: 0.00001               # Minimum LR
+  weight_decay: 0.0001          # Same as notebook (0.0001)
+  grad_clip: 2.0                # Moderate clipping (not too aggressive)
+  mixed_precision: false        # Disable for stability (notebook doesn't use it)
+  warmup_epochs: 0              # No warmup - keep it simple
 
 # ============================================================================
 # OPTIMIZER & SCHEDULER CONFIGURATION
@@ -38,17 +40,17 @@ optimizer:
   eps: 0.00000001
 
 scheduler:
-  type: "cosine_warmup"         # Cosine Annealing with Warm Restarts
-  T_0: 20                       # Restart every 20 epochs (was 10 - too fast)
-  T_mult: 1                     # Keep same period (was 2 - too aggressive)
-  eta_min: 0.00001              # Higher minimum LR (was 0.000001)
+  type: "linear"                # LinearLR - same as notebook
+  start_factor: 1.0             # Start at 100% of initial LR
+  end_factor: 0.1               # End at 10% of initial LR (0.00005)
+  # Linear decay from 0.0005 to 0.00005 over all epochs
 
 # ============================================================================
 # LOSS FUNCTION CONFIGURATION
 # ============================================================================
 loss:
-  type: "smooth_l1"             # SmoothL1Loss (good for keypoint regression)
-  beta: 1.0                     # Transition point between L1 and L2
+  type: "mse"                   # MSE on heatmaps - back to working config
+  # MSE worked well for epochs 1-6, we just need to prevent collapse
 
 # ============================================================================
 # VALIDATION & CHECKPOINTING

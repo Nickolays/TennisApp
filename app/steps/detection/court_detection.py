@@ -11,6 +11,8 @@ from typing import Optional
 from app.steps.base import PipelineStep
 from app.core.context import ProcessingContext
 from app.models.model_registry import ModelRegistry
+from app.src.court_refinement import CourtKeypointRefinement
+from app.core.data_models import COURT_TEMPLATE_KEYPOINTS
 
 
 class CourtDetectionStep(PipelineStep):
@@ -50,6 +52,19 @@ class CourtDetectionStep(PipelineStep):
         # Model will be loaded lazily via ModelRegistry
         self.model = None
 
+        # Initialize geometric refinement module
+        self.use_refinement = config.get('use_refinement', True)
+        if self.use_refinement:
+            self.refinement = CourtKeypointRefinement(
+                court_template=COURT_TEMPLATE_KEYPOINTS,
+                crop_size=config.get('refinement_crop_size', 50),
+                max_local_shift=config.get('refinement_max_local_shift', 15.0),
+                max_regularization_shift=config.get('refinement_max_reg_shift', 10.0),
+                ransac_threshold=config.get('refinement_ransac_threshold', 5.0)
+            )
+        else:
+            self.refinement = None
+
     def _load_model(self):
         """Lazy load model via ModelRegistry"""
         if self.model is None:
@@ -87,13 +102,19 @@ class CourtDetectionStep(PipelineStep):
 
         return frame_tensor
 
-    def _postprocess_output(self, output: torch.Tensor, original_size: tuple) -> tuple:
+    def _postprocess_output(
+        self,
+        output: torch.Tensor,
+        original_size: tuple,
+        frame: Optional[np.ndarray] = None
+    ) -> tuple:
         """
-        Convert model output to keypoints
+        Convert model output to keypoints with optional geometric refinement
 
         Args:
             output: Model output (1, 14, H, W) - heatmaps for 14 keypoints
             original_size: (orig_width, orig_height)
+            frame: Original frame (H, W, 3) for local refinement (optional)
 
         Returns:
             (keypoints, confidence):
@@ -121,10 +142,39 @@ class CourtDetectionStep(PipelineStep):
             keypoints.append([x, y])
             confidences.append(max_val)
 
-        keypoints = np.array(keypoints)
-        avg_confidence = np.mean(confidences)
+        keypoints = np.array(keypoints)  # (14, 2)
+        confidences = np.array(confidences)  # (14,)
 
+        # Apply geometric refinement if enabled
+        if self.use_refinement and self.refinement is not None and frame is not None:
+            try:
+                keypoints, refinement_stats = self.refinement.refine(
+                    keypoints, frame, confidences
+                )
+
+                # Optional: Log refinement statistics
+                if self.config.get('log_refinement_stats', False):
+                    self._log_refinement_stats(refinement_stats)
+
+            except Exception as e:
+                # Fallback to original keypoints if refinement fails
+                print(f"    Warning: Refinement failed ({e}), using original keypoints")
+
+        avg_confidence = float(confidences.mean())
         return keypoints, avg_confidence
+
+    def _log_refinement_stats(self, stats: dict):
+        """
+        Log refinement statistics for debugging.
+
+        Args:
+            stats: Refinement statistics dictionary
+        """
+        for stage, shifts in stats['shifts'].items():
+            if shifts is not None and len(shifts) > 0:
+                mean_shift = shifts.mean()
+                max_shift = shifts.max()
+                print(f"    {stage}: mean={mean_shift:.2f}px, max={max_shift:.2f}px")
 
     def process(self, context: ProcessingContext) -> ProcessingContext:
         """
@@ -155,19 +205,20 @@ class CourtDetectionStep(PipelineStep):
 
         # Process frames at specified interval
         for i in range(0, len(context.frames), self.interval):
-            frame = context.frames[i]
+            frame_original = context.frames[i]  # Keep original frame for refinement
             frame_id = context.frame_ids[i]
 
             # Preprocess
-            frame_tensor = self._preprocess_frame(frame)
+            frame_tensor = self._preprocess_frame(frame_original)
 
             # Inference
             output = self.model(frame_tensor)
 
-            # Postprocess
+            # Postprocess with refinement (pass original frame)
             keypoints, confidence = self._postprocess_output(
                 output,
-                original_size=(context.width, context.height)
+                original_size=(context.width, context.height),
+                frame=frame_original  # NEW: Pass frame for geometric refinement
             )
 
             # Store in detection

@@ -6,6 +6,7 @@ import torch
 from torch.utils.data import Dataset
 
 from .transform import CourtTransform
+from .heatmap_utils import generate_heatmaps
 
 
 class CocoBallDataset(Dataset):
@@ -79,11 +80,18 @@ class CocoBallDataset(Dataset):
         )
 
 class CocoCourtDataset(Dataset):
-    def __init__(self, ann_file, img_dir, target_size=(640, 640), scale=2, hp_radius=7, train=True):
+    def __init__(self, ann_file, img_dir, target_size=(640, 640), scale=1, hp_radius=7, train=True):
+        """
+        Court keypoint dataset with heatmap generation.
+
+        Args:
+            scale: Output resolution divisor (1 = full resolution, 2 = half)
+                   IMPORTANT: Use scale=1 for maximum precision!
+        """
         self.img_dir = img_dir
         self.scale = scale
         self.hp_radius = hp_radius
-        self.output_h = target_size[0] // scale
+        self.output_h = target_size[0] // scale  # Full resolution when scale=1
         self.output_w = target_size[1] // scale
         self.transform = CourtTransform(target_size=target_size, train=train)
 
@@ -118,11 +126,19 @@ class CocoCourtDataset(Dataset):
 
         img, kps = self.transform(img, kps)
 
-        # hm_hp = np.zeros((self.num_keypoints, self.output_h, self.output_w), dtype=np.float32)
+        # Generate target heatmaps for training
+        # IMPORTANT: This is the correct approach for keypoint detection!
+        target_heatmaps = generate_heatmaps(
+            kps,
+            self.output_h,
+            self.output_w,
+            radius=self.hp_radius
+        )
 
+        # Return: image, target heatmaps, coordinates (for metrics), name
         return (
             img,
-            # torch.tensor(hm_hp, dtype=torch.float32),
-            kps.to(torch.int32),
+            torch.tensor(target_heatmaps, dtype=torch.float32),  # (14, H, W)
+            kps.to(torch.float32),  # Keypoint coordinates (14, 2) for metrics
             img_info["file_name"].split(".")[0],
         )

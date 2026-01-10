@@ -29,11 +29,19 @@ detection:
   # Court Detection (TrackNet)
   court:
     enabled: true
-    model_path: "models/court_model_best.pt"
+    model_path: "models/court_model_best.pth"
     model_type: "tracknet"     # Easily swap: "tracknet" | "custom_cnn"
     interval: 30               # Detect every N frames (court doesn't move)
     confidence_threshold: 0.5
     input_size: [640, 360]     # Model input resolution
+
+    # Geometric Refinement (CPU-based post-processing)
+    use_refinement: true                  # Enable refinement (Stage 3 disabled internally)
+    refinement_crop_size: 50              # Pixels for local line detection crop
+    refinement_max_local_shift: 15.0      # Max shift in Stage 1 (pixels)
+    refinement_max_reg_shift: 10.0        # Max shift in Stage 3 (pixels)
+    refinement_ransac_threshold: 5.0      # RANSAC inlier threshold for homography
+    log_refinement_stats: false           # Enable for debugging (logs per-stage shifts)
 
   # Ball Detection (TrackNet)
   ball:
@@ -47,7 +55,7 @@ detection:
   # Player Detection (YOLO)
   player:
     enabled: true
-    model_path: "models/yolov11n.pt"
+    model_path: "models/yolo11n.pt"  # Fixed: actual filename is yolo11n.pt (not yolov11n.pt)
     model_type: "yolo"         # Easily swap: "yolo" | "faster_rcnn" | "detr"
     interval: 1                # Every frame
     confidence_threshold: 0.5

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 Court Detection Training Script
-Optimized for RTX 3070 (8GB) with batch_size=4
+Trains TrackNet model with BCEWithLogitsLoss on sparse heatmap targets
 """
 import os
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, random_split
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+from torch.utils.data import DataLoader, random_split, Subset
+from torch.optim.lr_scheduler import LinearLR, SequentialLR
 from torch.cuda.amp import autocast, GradScaler
 import numpy as np
 from tqdm import tqdm
@@ -82,75 +82,56 @@ def save_checkpoint(model, optimizer, scheduler, epoch, train_loss, val_loss,
 
 
 def train_one_epoch(model, dataloader, optimizer, criterion, scaler, config, epoch):
-    """Train for one epoch"""
+    """Train for one epoch using direct coordinate regression with gradient accumulation"""
     model.train()
     running_loss = 0.0
     all_preds = []
     all_targets = []
 
+    # Gradient accumulation setup
+    accumulation_steps = config["training"].get("accumulation_steps", 1)
+
     pbar = tqdm(enumerate(dataloader), total=len(dataloader),
                 desc=f"Epoch {epoch+1} [Train]")
 
-    for step, (imgs, keypoints, _) in pbar:
+    for step, (imgs, target_heatmaps, keypoints, _) in pbar:
         imgs = imgs.to(device, dtype=torch.float32)
+        target_heatmaps = target_heatmaps.to(device, dtype=torch.float32)
         keypoints = keypoints.to(device, dtype=torch.float32)
 
-        optimizer.zero_grad()
+        # Forward: model outputs predicted heatmaps
+        outputs = model(imgs)  # (B, 14, H, W)
 
-        # Mixed precision training
-        if config["training"]["mixed_precision"]:
-            with autocast():
-                outputs = model(imgs)
-                preds = court_postprocess(outputs)
+        # HEATMAP LOSS - This is the correct approach!
+        # MSE between predicted heatmaps and target Gaussian heatmaps
+        loss = criterion(outputs, target_heatmaps) / accumulation_steps
+        loss.backward()
 
-                # Scale GT to output resolution
-                H_out, W_out = outputs.shape[2:]
-                H_in, W_in = imgs.shape[2:]
-                scale_x, scale_y = W_out / W_in, H_out / H_in
-                target_scaled = keypoints.clone()
-                target_scaled[..., 0] *= scale_x
-                target_scaled[..., 1] *= scale_y
-
-                loss = criterion(preds, target_scaled)
-
-            scaler.scale(loss).backward()
-
+        # Only step optimizer every accumulation_steps batches
+        if (step + 1) % accumulation_steps == 0:
             if config["training"]["grad_clip"] > 0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(
+                grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(),
                     config["training"]["grad_clip"]
                 )
-
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            outputs = model(imgs)
-            preds = court_postprocess(outputs)
-
-            H_out, W_out = outputs.shape[2:]
-            H_in, W_in = imgs.shape[2:]
-            scale_x, scale_y = W_out / W_in, H_out / H_in
-            target_scaled = keypoints.clone()
-            target_scaled[..., 0] *= scale_x
-            target_scaled[..., 1] *= scale_y
-
-            loss = criterion(preds, target_scaled)
-            loss.backward()
-
-            if config["training"]["grad_clip"] > 0:
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(),
-                    config["training"]["grad_clip"]
-                )
-
+                # Warning if gradients are exploding
+                if grad_norm > 10.0:
+                    print(f"\n⚠️  WARNING: Large gradient norm: {grad_norm:.2f}")
             optimizer.step()
+            optimizer.zero_grad()
 
-        running_loss += loss.item()
-        all_preds.append(preds.detach())
-        all_targets.append(target_scaled.detach())
+        running_loss += loss.item() * accumulation_steps
 
-        pbar.set_postfix(loss=f"{loss.item():.3f}")
+        # For metrics: convert heatmaps to coordinates (not used in loss!)
+        with torch.no_grad():
+            preds = court_postprocess(outputs)  # (B, 14, 2)
+
+            # Keypoints are already in output resolution (512x512)
+            # No scaling needed when scale=1!
+            all_preds.append(preds)
+            all_targets.append(keypoints)
+
+        pbar.set_postfix(loss=f"{loss.item() * accumulation_steps:.3f}")
 
     # Compute epoch metrics
     all_preds = torch.cat(all_preds, dim=0)
@@ -164,7 +145,7 @@ def train_one_epoch(model, dataloader, optimizer, criterion, scaler, config, epo
 
 @torch.no_grad()
 def validate(model, dataloader, criterion, config, epoch):
-    """Validation loop"""
+    """Validation loop using heatmap-based loss"""
     model.eval()
     running_loss = 0.0
     all_preds = []
@@ -172,25 +153,25 @@ def validate(model, dataloader, criterion, config, epoch):
 
     pbar = tqdm(dataloader, desc=f"Epoch {epoch+1} [Val]")
 
-    for imgs, keypoints, _ in pbar:
+    for imgs, target_heatmaps, keypoints, _ in pbar:
         imgs = imgs.to(device, dtype=torch.float32)
+        target_heatmaps = target_heatmaps.to(device, dtype=torch.float32)
         keypoints = keypoints.to(device, dtype=torch.float32)
 
-        outputs = model(imgs)
-        preds = court_postprocess(outputs)
+        # Forward: model outputs predicted heatmaps
+        outputs = model(imgs)  # (B, 14, H, W)
 
-        H_out, W_out = outputs.shape[2:]
-        H_in, W_in = imgs.shape[2:]
-        scale_x, scale_y = W_out / W_in, H_out / H_in
-        target_scaled = keypoints.clone()
-        target_scaled[..., 0] *= scale_x
-        target_scaled[..., 1] *= scale_y
-
-        loss = criterion(preds, target_scaled)
+        # HEATMAP LOSS
+        loss = criterion(outputs, target_heatmaps)
         running_loss += loss.item()
 
+        # For metrics: convert to coordinates
+        preds = court_postprocess(outputs)  # (B, 14, 2)
+
+        # Keypoints already in output resolution (512x512)
+        # No scaling needed when scale=1!
         all_preds.append(preds)
-        all_targets.append(target_scaled)
+        all_targets.append(keypoints)
 
         pbar.set_postfix(loss=f"{loss.item():.3f}")
 
@@ -229,24 +210,53 @@ def train():
 
     # Load dataset
     print("📊 Loading dataset...")
-    full_dataset = CocoCourtDataset(
+    # BUG FIX: Create separate datasets for train/val
+    # Previously we created one dataset with train=True, then split it
+    # This caused validation data to be augmented!
+
+    # Load all data first to get indices for splitting
+    temp_dataset = CocoCourtDataset(
         ann_file=config["data"]["ann_file"],
         img_dir=config["data"]["img_dir"],
         target_size=tuple(config["data"]["target_size"]),
-        train=True,
+        train=False,  # No augmentation for splitting
     )
 
-    # Split into train/val
-    train_size = int(config["data"]["train_split"] * len(full_dataset))
-    val_size = len(full_dataset) - train_size
+    # Get train/val indices
+    total_size = len(temp_dataset)
+    train_size = int(config["data"]["train_split"] * total_size)
+    val_size = total_size - train_size
 
-    train_dataset, val_dataset = random_split(
-        full_dataset,
-        [train_size, val_size],
-        generator=torch.Generator().manual_seed(config["system"]["seed"])
+    indices = list(range(total_size))
+    torch.manual_seed(config["system"]["seed"])
+    torch.Generator().manual_seed(config["system"]["seed"])
+    import random as pyrandom
+    pyrandom.seed(config["system"]["seed"])
+    pyrandom.shuffle(indices)
+
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size:]
+
+    # Create separate datasets with different transforms
+    train_dataset_full = CocoCourtDataset(
+        ann_file=config["data"]["ann_file"],
+        img_dir=config["data"]["img_dir"],
+        target_size=tuple(config["data"]["target_size"]),
+        train=True,  # Augmentation enabled (currently disabled in transform.py)
     )
 
-    print(f"  Total: {len(full_dataset)}")
+    val_dataset_full = CocoCourtDataset(
+        ann_file=config["data"]["ann_file"],
+        img_dir=config["data"]["img_dir"],
+        target_size=tuple(config["data"]["target_size"]),
+        train=False,  # NO augmentation for validation
+    )
+
+    # Create subset datasets
+    train_dataset = Subset(train_dataset_full, train_indices)
+    val_dataset = Subset(val_dataset_full, val_indices)
+
+    print(f"  Total: {total_size}")
     print(f"  Train: {len(train_dataset)}")
     print(f"  Val: {len(val_dataset)}")
     print()
@@ -282,7 +292,12 @@ def train():
 
     # Loss, optimizer, scheduler
     print("⚙️  Setting up training...")
-    criterion = nn.SmoothL1Loss(beta=config["loss"]["beta"])
+    if config["loss"]["type"] == "mse":
+        criterion = nn.MSELoss()
+    elif config["loss"]["type"] == "smoothl1":
+        criterion = nn.SmoothL1Loss(beta=config["loss"]["beta"])
+    else:
+        raise ValueError(f"Unknown loss type: {config['loss']['type']}")
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -292,18 +307,46 @@ def train():
         weight_decay=config["training"]["weight_decay"],
     )
 
-    scheduler = CosineAnnealingWarmRestarts(
-        optimizer,
-        T_0=config["scheduler"]["T_0"],
-        T_mult=config["scheduler"]["T_mult"],
-        eta_min=config["scheduler"]["eta_min"],
-    )
+    # Scheduler with warmup
+    warmup_epochs = config["training"].get("warmup_epochs", 0)
+    total_epochs = config["training"]["num_epochs"]
+
+    if warmup_epochs > 0:
+        # Warmup: gradually increase LR from 0.1x to 1.0x
+        warmup_scheduler = LinearLR(
+            optimizer,
+            start_factor=0.1,
+            end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
+        # Decay: decrease LR from 1.0x to 0.1x
+        decay_scheduler = LinearLR(
+            optimizer,
+            start_factor=1.0,
+            end_factor=0.1,
+            total_iters=total_epochs - warmup_epochs,
+        )
+        # Combine warmup + decay
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, decay_scheduler],
+            milestones=[warmup_epochs]
+        )
+        print(f"  Scheduler: Warmup ({warmup_epochs} epochs) + Linear Decay")
+    else:
+        # No warmup, just linear decay
+        scheduler = LinearLR(
+            optimizer,
+            start_factor=1.0,
+            end_factor=0.1,
+            total_iters=total_epochs,
+        )
+        print(f"  Scheduler: LinearLR (1.0 -> 0.1)")
 
     scaler = GradScaler() if config["training"]["mixed_precision"] else None
 
-    print(f"  Loss: SmoothL1Loss")
+    print(f"  Loss: {config['loss']['type'].upper()}")
     print(f"  Optimizer: AdamW")
-    print(f"  Scheduler: CosineAnnealingWarmRestarts")
     print()
 
     # Training loop
@@ -368,7 +411,7 @@ def train():
                 best_val_loss = val_loss
                 epochs_without_improvement = 0
 
-                best_path = checkpoint_dir / "best_model.pth"
+                best_path = checkpoint_dir / "best_model.pt"
                 save_checkpoint(
                     model, optimizer, scheduler, epoch + 1,
                     train_loss, val_loss, val_metrics, config, best_path
@@ -379,14 +422,25 @@ def train():
 
         # Periodic checkpoint (every 10 epochs instead of 5)
         if (epoch + 1) % config["checkpoint"]["save_interval"] == 0:
-            periodic_path = checkpoint_dir / f"checkpoint_epoch_{epoch+1}.pth"
+            periodic_path = checkpoint_dir / f"checkpoint_epoch_{epoch+1}.pt"
             save_checkpoint(
                 model, optimizer, scheduler, epoch + 1,
                 train_loss, val_loss, val_metrics if val_loss else train_metrics,
                 config, periodic_path
             )
 
-        # Early stopping
+        # CRITICAL: Check for gradient explosion / training collapse
+        if val_metrics and val_metrics['mean_error_px'] > 100:
+            print(f"\n🛑 STOPPING TRAINING - Gradient explosion detected!")
+            print(f"   Val Mean Error: {val_metrics['mean_error_px']:.2f}px (threshold: 100px)")
+            print(f"   Restoring best model from epoch with Val Loss: {best_val_loss:.4f}")
+            # Load best model
+            best_checkpoint = torch.load(checkpoint_dir / "best_model.pt")
+            model.load_state_dict(best_checkpoint['model_state_dict'])
+            print(f"   ✓ Best model restored")
+            break
+
+        # Early stopping (no improvement)
         if epochs_without_improvement >= config["validation"]["early_stopping_patience"]:
             print(f"\n⚠️  Early stopping at epoch {epoch+1}")
             print(f"   No improvement for {epochs_without_improvement} epochs")
@@ -394,7 +448,7 @@ def train():
 
     # Save final model
     if config["checkpoint"]["save_final"]:
-        final_path = checkpoint_dir / "final_model.pth"
+        final_path = checkpoint_dir / "final_model.pt"
         save_checkpoint(
             model, optimizer, scheduler, epoch + 1,
             train_loss, val_loss if val_loss else train_loss,
@@ -418,7 +472,7 @@ def train():
     # Copy best model to standard location
     best_model_path = Path("models/court_model_best.pt")
     best_model_path.parent.mkdir(exist_ok=True)
-    shutil.copy2(checkpoint_dir / "best_model.pth", best_model_path)
+    shutil.copy2(checkpoint_dir / "best_model.pt", best_model_path)
     print(f"   Best model: {best_model_path}")
 
 

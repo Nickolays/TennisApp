@@ -7,7 +7,7 @@
 ## Prerequisites
 
 ```bash
-cd TennisAnalysis/TennisApp
+cd TennisApp
 source ../.venv/bin/activate
 ```
 
@@ -65,20 +65,47 @@ python visualize_court_video.py tests/video3.mp4 \
 
 ---
 
-## 3. Full Tennis Analysis Pipeline
+## 3. Full Tennis Analysis Pipeline with Homography
 
-Process complete match video (court + ball + players + tracking):
+Process complete match video (court + ball + players + **bird's-eye view**):
 
 ```bash
 python process_video.py tests/video3.mp4 \
-  --config configs/default.yaml \
-  --output results/analysis/
+  --output results/ \
+  --max-frames 500 \
+  --config configs/default.yaml
 ```
 
+**Model paths are read from `configs/default.yaml`:**
+```yaml
+detection:
+  court:
+    model_path: "models/court_model_best.pth"  # Your trained court model
+  ball:
+    model_path: "models/ball_model_best.pt"
+  player:
+    model_path: "models/yolo11n.pt"
+```
+
+**What you'll see**:
+- **Left panel**: Original video with detections (court, ball, players)
+- **Right panel**: Bird's-eye view court with transformed positions
+- Real-time homography transformation (pixel → real-world court coordinates)
+
 **Output**:
-- `video3_visualized.mp4` - Annotated video
-- `video3_results.json` - Complete analysis data
-- `video3_stats.json` - Statistics summary
+- `video3_visualized.mp4` - Side-by-side visualization with bird's-eye view
+- `video3_results.json` - Complete analysis data with court coordinates
+- Bounce and hit events marked in video
+
+**Fast test**:
+```bash
+python process_video.py tests/video3.mp4 --max-frames 100
+```
+
+**Use custom config**:
+```bash
+python process_video.py tests/video3.mp4 --config my_config.yaml
+```
 
 ---
 
@@ -89,7 +116,7 @@ python process_video.py tests/video3.mp4 \
 training:
   batch_size: 4        # Adjust for your GPU memory
   num_epochs: 50       # Training duration
-  initial_lr: 0.001    # Learning rate
+  initial_lr: 0.0005   # Learning rate (DO NOT change - matches notebook!)
 ```
 
 **Pipeline**: [configs/default.yaml](configs/default.yaml)

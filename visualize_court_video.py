@@ -65,13 +65,13 @@ COLOR_HEATMAP_HOT = (0, 0, 255)   # Red
 class CourtVisualizer:
     """Court detection visualizer with advanced features"""
 
-    def __init__(self, model, target_size=(512, 512), device='cuda'):
+    def __init__(self, model, target_size=(640, 640), device='cuda'):
         """
         Initialize visualizer
 
         Args:
             model: Trained TrackNet model
-            target_size: Model input size (H, W)
+            target_size: Model input size (H, W) - must match training size
             device: cuda or cpu
         """
         self.model = model

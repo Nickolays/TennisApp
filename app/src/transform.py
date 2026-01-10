@@ -32,7 +32,7 @@ class CourtTransform:
         Args:
             target_size: (H, W) final image size
             crop_ratio: fraction to crop from each border (default 0.1)
-            train: enable random horizontal flip if True
+            train: enable augmentation if True
         """
         self.out_h, self.out_w = target_size
         self.crop_ratio = crop_ratio
@@ -58,16 +58,17 @@ class CourtTransform:
                 keypoints = keypoints.numpy()
             keypoints = keypoints - np.array([dx, dy])
 
-        # --- Random horizontal flip ---
-        if self.train and random.random() < 0.5:
-            img = cv2.flip(img, 1)
-            if keypoints is not None:
-                keypoints[:, 0] = (W - 2 * dx) - keypoints[:, 0]
+        # --- AUGMENTATIONS (training only) ---
+        # NO AUGMENTATION - removed to eliminate train/val gap
+        # Bug fix: validation was being augmented because we used random_split
+        # on a single dataset with train=True
+        pass
 
         # --- Resize image ---
         img = cv2.resize(img, (self.out_w, self.out_h))
-        scale_x = self.out_w / (W - 2 * dx)
-        scale_y = self.out_h / (H - 2 * dy)
+        h_before, w_before = img.shape[:2] if keypoints is None else (H - 2*dy, W - 2*dx)
+        scale_x = self.out_w / w_before
+        scale_y = self.out_h / h_before
         if keypoints is not None:
             keypoints[:, 0] *= scale_x
             keypoints[:, 1] *= scale_y
@@ -81,3 +82,51 @@ class CourtTransform:
 
         keypoints_out = torch.from_numpy(keypoints).float() if keypoints is not None else None
         return img, keypoints_out
+
+    def _rotate(self, img, keypoints, angle):
+        """Rotate image and keypoints around center"""
+        h, w = img.shape[:2]
+        center = (w / 2, h / 2)
+        M = cv2.getRotationMatrix2D(center, angle, 1.0)
+        img = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+
+        if keypoints is not None:
+            # Transform keypoints: [x, y, 1] @ M.T
+            ones = np.ones((keypoints.shape[0], 1))
+            kps_homogeneous = np.hstack([keypoints, ones])
+            keypoints = (M @ kps_homogeneous.T).T
+        return img, keypoints
+
+    def _perspective_transform(self, img, keypoints, margin_pct=0.05):
+        """Apply random perspective warp (simulate camera angles)"""
+        h, w = img.shape[:2]
+        margin = int(min(h, w) * margin_pct)
+
+        src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+        dst = np.float32([
+            [random.randint(0, margin), random.randint(0, margin)],
+            [w - random.randint(0, margin), random.randint(0, margin)],
+            [w - random.randint(0, margin), h - random.randint(0, margin)],
+            [random.randint(0, margin), h - random.randint(0, margin)]
+        ])
+
+        M = cv2.getPerspectiveTransform(src, dst)
+        img = cv2.warpPerspective(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+
+        if keypoints is not None:
+            # Transform keypoints to homogeneous coordinates
+            ones = np.ones((keypoints.shape[0], 1))
+            kps_h = np.hstack([keypoints, ones])
+            kps_transformed = (M @ kps_h.T).T
+            # Convert back from homogeneous
+            keypoints = kps_transformed[:, :2] / kps_transformed[:, 2:]
+        return img, keypoints
+
+    def _color_jitter(self, img):
+        """Random hue/saturation adjustments in HSV space (REDUCED)"""
+        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float32)
+        hsv[..., 0] += random.uniform(-5, 5)        # hue shift (was -8 to 8)
+        hsv[..., 1] *= random.uniform(0.9, 1.1)     # saturation (was 0.85-1.15)
+        hsv[..., 2] *= random.uniform(0.9, 1.1)     # value (was 0.85-1.15)
+        hsv = np.clip(hsv, 0, 255).astype(np.uint8)
+        return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
